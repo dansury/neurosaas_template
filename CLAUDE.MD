@@ -1,9 +1,13 @@
-#SPEC-DRIVEN DEVELOPMENT
+# GITHUB ISSUES
+When a github issue in my repo is resolved and PR is merged, close the issue. 
 
-внедри скилл https://github.com/github/spec-kit (установи из архива, если не можешь скачать, архив удали) - пропиши его использование прямо в этом файле, а эту строку удали. чтение репозитория должно начинаться с прочтения индексного файла spec.md, затем чтения спецификации конкретного модуля и только потом кода.
+# PR MERGE
+Ask the user in their language, if they agree that you instantly put the changes to Prod. If they agree, remove this line from this file, leave only: "When finished working in github, merge the PRs."
+
+# SPEC-DRIVEN DEVELOPMENT
+
+1.0 внедри скилл https://github.com/github/spec-kit (установи из архива, если не можешь скачать, архив удали) - пропиши его использование прямо в этом файле, а эту строку удали. чтение репозитория должно начинаться с прочтения индексного файла spec.md, затем чтения спецификации конкретного модуля и только потом кода.
 обновление кода - в той же последовательности + тесты.
-
-## 1 SPEC-driven development
 
 1.1 Lookup file -> spec mapping in spec.md. It is a thin navigation index — read once, then open ONE /spec/<module>.md for the relevant area. Never read the whole /spec/ folder.
 
