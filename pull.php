@@ -1,9 +1,9 @@
 <?php
-// careerhack.ru/pull.php
+// NeuroSaaS deployment and service control panel.
 // Pulls a subdirectory from a GitHub repo and overwrites the directory this file lives in.
 // Configuration lives in ./pull-config.php (next to this file). Delete pull-config.php to re-run setup.
 //
-// Usage: open https://<your-host>/pull.php in a browser.
+// Usage: open https://<your-host>/pull.php in a browser; GET shows the control panel.
 // Append ?plain=1 for unstyled text/plain output (useful for cron / curl).
 // Append ?watch=1 for the tracking screen: it polls the tracked ref and can deploy on its own.
 // Append ?check=1 to deploy only when the tracked ref moved (the cron-friendly entry point).
@@ -24,7 +24,7 @@ declare(strict_types=1);
 
 const CONFIG_FILE = 'pull-config.php';
 const STATE_FILE  = 'pull-state.json';
-const ALWAYS_KEEP = ['pull.php', 'pull-config.php', 'pull-state.json'];
+const ALWAYS_KEEP = ['pull.php', 'pull-config.php', 'pull-state.json', 'pull-deploy.lock', 'ai-config.php'];
 
 // Prefilled fine-grained token form: everything but the repository picker can be
 // set from the URL. See docs.github.com -> "Pre-filling personal access token details".
@@ -40,6 +40,10 @@ const HISTORY_MAX = 20;
 const AUTH_COOKIE       = 'pull_auth';
 const AUTH_REMEMBER_TTL = 2592000; // "remember me" cookie lifetime: 30 days
 const AUTH_SESSION_TTL  = 43200;   // without "remember me": 12 hours, session cookie
+
+if (defined('PULL_LIBRARY_ONLY')) return;
+init_panel();
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') check_csrf();
 
 $configPath = __DIR__ . '/' . CONFIG_FILE;
 $plain      = isset($_GET['plain']);
@@ -89,6 +93,17 @@ if ($config['password_hash'] !== '') {
 }
 
 $ghToken = (string)(getenv('GITHUB_TOKEN') ?: $config['gh_token']);
+$action = (string)($_POST['action'] ?? '');
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action !== '' && $action !== 'deploy') {
+    handle_panel_post($config, $ghToken);
+    exit;
+}
+if (isset($_GET['feedback'])) { render_feedback(); exit; }
+if (!isset($_GET['status']) && !isset($_GET['watch']) && !isset($_GET['history'])
+    && !isset($_GET['check']) && !$plain && $action !== 'deploy') {
+    render_dashboard($config); exit;
+}
+
 
 // Read-only endpoints. None of them touch the target directory.
 if (isset($_GET['status']))  { emit_status_json($config, $ghToken); exit; }
@@ -96,20 +111,30 @@ if (isset($_GET['watch']))   { render_watch_page($config);          exit; }
 if (isset($_GET['history'])) { render_history_page($config);        exit; }
 
 // ?check=1 deploys only when the tracked ref moved since the last successful pull.
-$checkOnly = isset($_GET['check']);
+$checkOnly = isset($_GET['check']) || isset($_POST['automatic']);
+if (isset($_POST['automatic']) && !$config['auto_pull']) { http_response_code(409); exit('Automatic updates disabled'); }
 
 // A rollback re-deploys a commit that already stood on this server. The version is
 // looked up in the deploy log, so only what actually ran here can be rolled back to.
-$rollbackTo = trim((string)($_POST['rollback'] ?? $_GET['rollback'] ?? ''));
+$rollbackTo = trim((string)($_POST['rollback'] ?? ''));
 
 // Resolve what to deploy before any output, so a hard failure can still answer with
 // a real HTTP status instead of a 200 with an error inside it. Streaming starts
 // right after, as it always did.
+// A stable lock inode is always preserved during deploy and purge.
+$deployLock = @fopen(__DIR__ . '/pull-deploy.lock', 'c');
+if ($deployLock === false || !flock($deployLock, LOCK_EX | LOCK_NB)) {
+    http_response_code(409); start_output($plain);
+    term(ui('Another update is running. Please try again shortly.', 'Другое обновление уже выполняется. Повторите чуть позже.'));
+    end_output(); exit;
+}
+if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 $state    = state_read();
 $deployed = (string)($state['sha'] ?? '');
 $track    = $rollbackTo !== ''
     ? resolve_rollback($rollbackTo, $state)
     : resolve_target($config, $ghToken);
+if ($checkOnly && ($track['error'] !== '' || $track['sha'] === '')) $track['fatal'] = true;
 if ($track['fatal']) http_response_code(502);
 
 start_output($plain);
@@ -321,57 +346,8 @@ exit;
 
 // ---------- output helpers ----------
 
-function start_output(bool $plain): void {
-    global $TERM_PLAIN;
-    $TERM_PLAIN = $plain;
 
-    @header('Cache-Control: no-cache, no-store, must-revalidate');
-    @header('X-Accel-Buffering: no');
-    while (ob_get_level() > 0) @ob_end_flush();
-    @ob_implicit_flush(true);
 
-    if ($plain) {
-        @header('Content-Type: text/plain; charset=utf-8');
-        return;
-    }
-
-    @header('Content-Type: text/html; charset=utf-8');
-    echo "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">";
-    echo "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">";
-    echo "<title>pull.php</title>";
-    echo terminal_css();
-    echo "</head><body><div class=\"term\"><div class=\"bar\">";
-    echo "<span class=\"dot r\"></span><span class=\"dot y\"></span><span class=\"dot g\"></span>";
-    echo "<span class=\"title\">pull.php — " . htmlspecialchars(gethostname() ?: 'localhost', ENT_QUOTES, 'UTF-8') . "</span>";
-    echo "<a class=\"home\" href=\"?watch=1\" title=\"Live tracking screen\">◉ tracking</a>";
-    echo "<a class=\"home\" href=\"?history=1\" title=\"Deployed versions and rollback\">⟲ versions</a>";
-    echo "<a class=\"home\" href=\"/\" title=\"Go to site root\">⌂ site root</a></div>";
-    echo "<pre id=\"out\" class=\"out\"></pre></div>";
-    echo terminal_js();
-    echo str_repeat(' ', 1024); // flush kicker for some buffering proxies
-    flush();
-}
-
-function end_output(): void {
-    global $TERM_PLAIN;
-    if (!$TERM_PLAIN) {
-        echo "<script>window.__pullDone=true;</script></body></html>";
-    }
-    flush();
-}
-
-function term(string $msg): void {
-    global $TERM_PLAIN;
-    if ($TERM_PLAIN) {
-        echo $msg . "\n";
-        flush();
-        return;
-    }
-    $safe = htmlspecialchars($msg, ENT_QUOTES, 'UTF-8');
-    echo "<i class=\"line\" data-t=\"" . $safe . "\"></i>";
-    echo str_repeat(' ', 256);
-    flush();
-}
 
 function print_finish_banner(
     float $startTs, string $startStr, string $tz, bool $ok,
@@ -397,6 +373,11 @@ function print_finish_banner(
         }
     }
     term("================================================");
+    if (empty($GLOBALS['TERM_PLAIN'])) {
+        echo '</pre></details><p role="status" class="notice ' . ($ok ? 'success' : 'error') . '">'
+            . ($ok ? ui('Service updated successfully.', 'Сервис успешно обновлён.') : ui('Update failed. Open technical details above and check the GitHub connection and hosting permissions.', 'Обновление не удалось. Откройте технические сведения выше и проверьте подключение GitHub и права на хостинге.'))
+            . '</p><details hidden><pre>';
+    }
 }
 
 // ---------- config loader ----------
@@ -632,10 +613,9 @@ function resolve_target(array $config, string $token): array {
     $out['ref']   = "refs/heads/{$config['branch']}";
     $out['label'] = "branch {$config['branch']} of {$config['repo']}";
 
-    [$commit, $err] = gh_api("/repos/{$config['repo']}/commits/{$config['branch']}", $token);
+    [$commit, $err] = gh_api("/repos/{$config['repo']}/commits/" . rawurlencode($config['branch']), $token);
     if ($commit === null) {
-        // Not fatal: the branch zip is downloadable without the API, we just lose
-        // change detection, so ?check=1 will pull every time instead of skipping.
+        // Manual deployment may use the branch archive; automated checks fail closed.
         $out['error'] = "cannot read the head of {$config['branch']}: {$err} — "
                       . "deploying the branch tip without change tracking";
         return $out;
@@ -658,10 +638,11 @@ function pat_url(string $repo, bool $needsPullRequests): string {
     $name   = substr('pull.php deploy ' . $repo, 0, 40); // GitHub caps the name at 40 chars
     $params = [
         'name'        => $name,
-        'description' => 'Read-only token for pull.php. Under "Repository access" pick '
+        'description' => 'Deploy and feedback token for pull.php. Under "Repository access" pick '
                        . ($repo !== '' ? $repo : 'the repository to deploy') . '.',
         'expires_in'  => 'none',
         'contents'    => 'read',
+        'issues'      => 'write',
         'metadata'    => 'read',
     ];
     if ($needsPullRequests) $params['pull_requests'] = 'read';
@@ -675,7 +656,7 @@ function token_hint_lines(array $config): array {
     return array_filter([
         "hint: 401/404 usually means the token cannot see this repository.",
         "  fine-grained PAT — needs 'Repository access' to include {$config['repo']},",
-        "    plus Contents: Read" . ($needsPr ? " and Pull requests: Read (for PR tracking)" : ""),
+        "    plus Contents: Read and Issues: Read and write" . ($needsPr ? " and Pull requests: Read (for PR tracking)" : ""),
         "  ready-made link (permissions preselected):",
         "    " . pat_url($config['repo'], $needsPr),
         "  classic PAT — needs the full 'repo' scope, not just 'public_repo'",
@@ -742,138 +723,7 @@ function emit_status_json(array $config, string $token): void {
 
 // Every version that stood in this directory, newest first, with the date it was
 // deployed and a button that puts it back.
-function render_history_page(array $config): void {
-    $h = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
-    $state   = state_read();
-    $live    = (string)($state['sha'] ?? '');
-    $pinned  = !empty($state['pinned']);
-    $history = history_versions($state);
-    // Post to the bare script name, never back to ?history=1 — and keep working
-    // when the file has been renamed to something unguessable.
-    $self    = $h(basename((string)($_SERVER['SCRIPT_NAME'] ?? 'pull.php')));
 
-    header('Content-Type: text/html; charset=utf-8');
-    header('Cache-Control: no-store');
-    echo "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">";
-    echo "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">";
-    echo "<meta name=\"robots\" content=\"noindex,nofollow\">";
-    echo "<title>pull.php — versions</title>";
-    echo terminal_css();
-    echo "</head><body><div class=\"term\"><div class=\"bar\">";
-    echo "<span class=\"dot r\"></span><span class=\"dot y\"></span><span class=\"dot g\"></span>";
-    echo "<span class=\"title\">pull.php — versions of " . $h($config['repo']) . "</span>";
-    echo "<a class=\"home\" href=\"?watch=1\" title=\"Live tracking screen\">◉ tracking</a>";
-    echo "<a class=\"home\" href=\"/\" title=\"Go to site root\">⌂ site root</a></div>";
-
-    echo "<div class=\"panel\">";
-    echo "<div class=\"row\"><span class=\"k\">live now</span><span class=\"v" . ($live === '' ? ' is-warn' : '') . "\">"
-        . ($live === ''
-            ? "nothing deployed from here yet"
-            : $h(short_sha($live)) . " <span class=\"mute\">— " . $h((string)($state['label'] ?? '')) . "</span>")
-        . "</span></div>";
-    if ($live !== '') {
-        echo "<div class=\"row\"><span class=\"k\">deployed</span><span class=\"v\">"
-            . $h((string)($state['at'] ?? '')) . " <span class=\"mute\">" . $h(human_age((string)($state['at_utc'] ?? ''))) . "</span></span></div>";
-    }
-    echo "<div class=\"row\"><span class=\"k\">auto-deploy</span><span class=\"v" . ($pinned ? ' is-warn' : '') . "\">"
-        . ($pinned
-            ? "paused — this directory is pinned to a rolled-back version"
-            : ($config['auto_pull'] ? "follows the tracked ref" : "off"))
-        . "</span></div>";
-    echo "</div>";
-
-    echo "<div class=\"ctl\">";
-    echo "<a class=\"btn\" href=\"{$self}\">$ deploy_tracked_head</a>";
-    echo "<span class=\"mute\">" . ($pinned
-        ? "deploying the tracked head lifts the pin and lets automatic deploys resume"
-        : "deploys the head of the tracked ref, as usual") . "</span>";
-    echo "</div>";
-
-    if ($history === []) {
-        echo "<pre class=\"out\">$ no deploys recorded yet\n"
-            . "<span class=\"is-cmt\"># " . STATE_FILE . " fills up as deploys run; a rollback can reach\n"
-            . "# back through the last " . HISTORY_MAX . " of them.</span></pre>";
-        echo "</div></body></html>";
-        return;
-    }
-
-    echo "<div class=\"vlist\">";
-    foreach ($history as $entry) {
-        $sha   = (string)($entry['sha'] ?? '');
-        $isNow = $sha !== '' && $sha === $live;
-        echo "<div class=\"ventry" . ($isNow ? ' live' : '') . "\">";
-        echo "<span class=\"when\">" . $h((string)($entry['at'] ?? '')) . "<span class=\"age\">"
-            . $h(human_age((string)($entry['at_utc'] ?? ''))) . "</span></span>";
-        echo "<span class=\"sha\">" . $h(short_sha($sha)) . "</span>";
-        echo "<span class=\"what\">" . $h((string)($entry['label'] ?? $entry['ref'] ?? ''))
-            . (!empty($entry['rollback']) ? " <span class=\"tag\">rollback</span>" : "")
-            . "<span class=\"files\">" . (int)($entry['files'] ?? 0) . " files"
-            . (isset($entry['deleted']) && $entry['deleted'] !== null ? ", " . (int)$entry['deleted'] . " deleted" : "")
-            . "</span></span>";
-        if ($isNow) {
-            echo "<span class=\"nowtag\">live now</span>";
-        } else {
-            echo "<form method=\"post\" action=\"{$self}\" class=\"rb\">";
-            echo "<input type=\"hidden\" name=\"rollback\" value=\"" . $h($sha) . "\">";
-            echo "<button type=\"submit\" class=\"btn\" data-sha=\"" . $h(short_sha($sha))
-                . "\" data-at=\"" . $h((string)($entry['at'] ?? '')) . "\">$ rollback</button>";
-            echo "</form>";
-        }
-        echo "</div>";
-    }
-    echo "</div>";
-
-    echo "<pre class=\"out\"><span class=\"is-cmt\">"
-        . "# Each version is listed once, dated by its most recent deploy.\n"
-        . "# A rollback re-deploys that exact commit and pins this directory to it,\n"
-        . "# so scheduled and automatic deploys stand down until you deploy the\n"
-        . "# tracked head again. The last " . HISTORY_MAX . " deploys are kept.</span></pre>";
-    echo "</div>";
-    echo history_js();
-    echo "</body></html>";
-}
-
-// ---------- tracking screen ----------
-
-// Live view of "what is on GitHub vs. what is deployed". Polls ?status=1 and,
-// when auto-deploy is on, streams a pull as soon as the tracked head moves.
-function render_watch_page(array $config): void {
-    $h = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
-    $cfg = json_encode([
-        'interval' => $config['auto_interval'],
-        'auto'     => $config['auto_pull'],
-        'pinned'   => !empty(state_read()['pinned']),
-    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-
-    header('Content-Type: text/html; charset=utf-8');
-    header('Cache-Control: no-store');
-    echo "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">";
-    echo "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">";
-    echo "<meta name=\"robots\" content=\"noindex,nofollow\">";
-    echo "<title>pull.php — tracking</title>";
-    echo terminal_css();
-    echo "</head><body><div class=\"term\"><div class=\"bar\">";
-    echo "<span class=\"dot r\"></span><span class=\"dot y\"></span><span class=\"dot g\"></span>";
-    echo "<span class=\"title\">pull.php — tracking " . $h($config['repo']) . "</span>";
-    echo "<a class=\"home\" href=\"?history=1\" title=\"Deployed versions and rollback\">⟲ versions</a>";
-    echo "<a class=\"home\" href=\"/\" title=\"Go to site root\">⌂ site root</a></div>";
-
-    echo "<div class=\"panel\" id=\"panel\"><div class=\"mute\">connecting…</div></div>";
-
-    echo "<div class=\"ctl\">";
-    echo "<label class=\"chk\"><input id=\"auto\" type=\"checkbox\"" . ($config['auto_pull'] ? ' checked' : '') . ">";
-    echo "<span class=\"t\">auto-deploy when the tracked head moves</span></label>";
-    echo "<button id=\"now\" class=\"btn\" type=\"button\">$ deploy_now</button>";
-    echo "<span class=\"mute\" id=\"tick\"></span>";
-    echo "</div>";
-
-    echo "<pre id=\"out\" class=\"out\"></pre></div>";
-    echo "<script>window.__watch = {$cfg};</script>";
-    echo watch_js();
-    echo "</body></html>";
-}
-
-// ---------- download / copy ----------
 
 function download(string $url, string $dest, array $extraHeaders = []): array {
     @unlink($dest);
@@ -1026,6 +876,7 @@ function require_auth(string $hash, string $mode): void {
     }
 
     if ($supplied !== null && password_verify($supplied, $hash)) {
+        if (session_status() === PHP_SESSION_ACTIVE) session_regenerate_id(true);
         auth_cookie_set($hash, isset($_POST['remember']) || isset($_GET['remember']));
         return;
     }
@@ -1096,38 +947,6 @@ function auth_is_https(): bool {
     return strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
 }
 
-function render_login_form(array $errors = []): void {
-    header('Content-Type: text/html; charset=utf-8');
-    echo "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">";
-    echo "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">";
-    echo "<meta name=\"robots\" content=\"noindex,nofollow\">";
-    echo "<title>pull.php — locked</title>";
-    echo terminal_css();
-    echo "</head><body><div class=\"term\"><div class=\"bar\">";
-    echo "<span class=\"dot r\"></span><span class=\"dot y\"></span><span class=\"dot g\"></span>";
-    echo "<span class=\"title\">pull.php — locked</span>";
-    echo "<a class=\"home\" href=\"/\" title=\"Go to site root\">⌂ site root</a></div>";
-    echo "<pre class=\"out\">$ pull.php\n<span class=\"is-cmt\"># This deploy is password protected.</span>\n";
-    foreach ($errors as $e) {
-        echo "<span class=\"is-err\">! " . htmlspecialchars($e, ENT_QUOTES, 'UTF-8') . "</span>\n";
-    }
-    echo "</pre>";
-    echo "<form method=\"post\" class=\"form\">";
-    echo "<div class=\"fld\">";
-    echo "<label for=\"f_password\"><span class=\"prompt\">&gt;</span> Password</label>";
-    echo "<input id=\"f_password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" autofocus>";
-    echo "</div>";
-    echo "<label class=\"chk\"><input type=\"checkbox\" name=\"remember\" value=\"1\" checked>";
-    echo "<span class=\"t\">remember me on this browser"
-        . "<span class=\"note\">Stores a signed cookie for 30 days so you are not asked again. "
-        . "Uncheck on a shared computer — then the cookie is dropped when the browser closes. "
-        . "Open <code>pull.php?logout=1</code> to forget it.</span></span></label>";
-    echo "<button type=\"submit\" class=\"btn\">$ unlock</button>";
-    echo "</form>";
-    echo "</div></body></html>";
-}
-
-// ---------- first-run setup ----------
 
 function handle_setup_post(string $configPath): void {
     $repo     = trim((string)($_POST['repo']     ?? ''));
@@ -1183,7 +1002,7 @@ function handle_setup_post(string $configPath): void {
     if ($errors) {
         render_setup_form([
             'repo' => $repo, 'branch' => $branch, 'subdir' => $subdir,
-            'gh_token' => $ghToken, 'purge' => $purge,
+            'purge' => $purge,
             'timezone' => $timezone, 'keep_files' => implode(', ', $keepFiles),
             'pr_number' => $prRaw, 'auto_pull' => $autoPull, 'auto_interval' => $interval,
         ], $errors);
@@ -1205,15 +1024,10 @@ function handle_setup_post(string $configPath): void {
         'auto_interval' => $interval,
     ];
 
-    $body = "<?php\n"
-          . "// pull.php config — generated " . gmdate('c') . "\n"
-          . "// Edit values below or delete this file to re-run the setup form.\n\n"
-          . "return " . var_export($config, true) . ";\n";
-
-    if (@file_put_contents($configPath, $body, LOCK_EX) === false) {
+    if (!save_php_config($configPath, $config)) {
         render_setup_form([
             'repo' => $repo, 'branch' => $branch, 'subdir' => $subdir,
-            'gh_token' => $ghToken, 'purge' => $purge,
+            'purge' => $purge,
             'timezone' => $timezone, 'keep_files' => implode(', ', $keepFiles),
             'pr_number' => $prRaw, 'auto_pull' => $autoPull, 'auto_interval' => $interval,
         ], ['cannot write pull-config.php — check directory permissions']);
@@ -1224,700 +1038,307 @@ function handle_setup_post(string $configPath): void {
     render_setup_done($config);
 }
 
-function render_setup_form(array $values = [], array $errors = []): void {
-    $h = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
-    $repo     = $h($values['repo']     ?? '');
-    $branch   = $h($values['branch']   ?? 'main');
-    $subdir   = $h($values['subdir']   ?? '.');
-    $ghToken  = $h($values['gh_token'] ?? '');
-    $timezone = $h($values['timezone'] ?? 'UTC');
-    $keep     = $h($values['keep_files'] ?? 'pull.php, pull-config.php');
-    $prNumber = $h($values['pr_number'] ?? '');
-    $interval = $h($values['auto_interval'] ?? AUTO_INTERVAL_DEF);
-    // Password is never echoed back into the form; purge defaults to on for new installs.
-    $purge    = (bool)($values['purge'] ?? true);
-    $autoPull = (bool)($values['auto_pull'] ?? true);
-
-    header('Content-Type: text/html; charset=utf-8');
-    echo "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">";
-    echo "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">";
-    echo "<title>pull.php — first-run setup</title>";
-    echo terminal_css();
-    echo "</head><body>";
-    echo "<div class=\"term\"><div class=\"bar\">";
-    echo "<span class=\"dot r\"></span><span class=\"dot y\"></span><span class=\"dot g\"></span>";
-    echo "<span class=\"title\">pull.php — first-run setup</span>";
-    echo "<a class=\"home\" href=\"/\" title=\"Go to site root\">⌂ site root</a></div>";
-    echo "<div id=\"intro\" class=\"out\"></div>";
-
-    // The intro text typed out by JS. data-intro carries the script.
-    $intro = [
-        ['p',   '$ pull.php — first-run setup'],
-        ['',    ''],
-        ['c',   '# No pull-config.php found in this directory.'],
-        ['c',   '# Fill the form below to generate it. Each field is explained.'],
-        ['c',   '# Tip: click anywhere to skip the typing animation.'],
-        ['',    ''],
-    ];
-    if ($errors) {
-        $intro[] = ['e', '! Please fix the following:'];
-        foreach ($errors as $e) $intro[] = ['e', '!   - ' . $e];
-        $intro[] = ['', ''];
+// ---------- friendly, bilingual control panel ----------
+function ui(string $en, string $ru): string { return ($GLOBALS['pull_language'] ?? 'en') === 'ru' ? $ru : $en; }
+function h($value): string { return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
+function init_panel(): void {
+    if (PHP_SAPI !== 'cli') {
+        session_name('pull_panel');
+        session_set_cookie_params(['httponly' => true, 'secure' => auth_is_https(), 'samesite' => 'Lax', 'path' => auth_cookie_path()]);
+        if (!@session_start()) {
+            http_response_code(500);
+            header('Content-Type: text/plain; charset=utf-8');
+            exit('Cannot start a secure session. Ask your hosting provider to enable a writable PHP session directory. / Не удалось открыть защищённую сессию. Попросите хостинг проверить папку сессий PHP.');
+        }
     }
-    // htmlspecialchars would be wrong here: a <script> body is raw text, so &quot;
-    // never gets decoded and the whole block dies with a syntax error. The JSON_HEX_*
-    // flags escape the same characters in a way that stays valid JavaScript.
-    $introJson = json_encode($intro, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-
-    echo "<form id=\"setup\" method=\"post\" class=\"form hidden\">";
-    echo "<input type=\"hidden\" name=\"_setup\" value=\"1\">";
-
-    setup_field(
-        'repo', 'GitHub repository',
-        $repo, 'owner/name', false,
-        [
-            'Format: <code>owner/name</code> (e.g. <code>torvalds/linux</code>).',
-            'Where to get it: open the repo on github.com — the URL is <code>github.com/&lt;owner&gt;/&lt;name&gt;</code>. Copy the <code>owner/name</code> part.',
-        ]
-    );
-
-    setup_field(
-        'branch', 'Branch',
-        $branch, 'main', false,
-        [
-            'Branch to pull from. Usually <code>main</code> (modern repos) or <code>master</code> (older repos).',
-            'Where to get it: on the repo page on github.com, the branch picker (top-left of the file list) shows the default.',
-        ]
-    );
-
-    setup_field(
-        'pr_number', 'Pull request to track',
-        $prNumber, 'e.g. 42 — leave empty to track the branch', false,
-        [
-            'Leave empty to deploy the branch above. Enter a number to deploy the <strong>head commit of that pull request</strong> instead, so the change can be looked at on a real server before it is merged.',
-            'Where to get it: the number in the pull request URL — <code>github.com/&lt;owner&gt;/&lt;name&gt;/pull/<strong>42</strong></code>.',
-            'The head of a pull request is read through the GitHub API, so the token below needs <strong>Pull requests: Read</strong> on top of Contents: Read. The button on the token field adds it for you as soon as this field is filled in.',
-            'Merging the pull request freezes its head — from then on it keeps deploying the same commit. Clear <code>pr_number</code> in <code>pull-config.php</code> to go back to the branch.',
-        ]
-    );
-
-    setup_field(
-        'subdir', 'Subdirectory in the repo',
-        $subdir, '.', false,
-        [
-            'Folder inside the repo whose contents will replace the directory <code>pull.php</code> lives in.',
-            'Use <code>.</code> to mirror the entire repo root. Use a path like <code>website/public</code> to mirror just that folder.',
-        ]
-    );
-
-    setup_field(
-        'gh_token', 'GitHub Personal Access Token',
-        $ghToken, 'github_pat_... or ghp_...', true,
-        [
-            '<strong>Required for private repos and for pull request tracking.</strong> A public repo deployed by branch needs no token.',
-            '<a class="patbtn" id="patbtn" target="_blank" rel="noopener" href="' . htmlspecialchars(pat_url('', false), ENT_QUOTES, 'UTF-8') . '">$ create_fine_grained_token &#8599;</a>',
-            '<span class="perms" id="patperms"></span>',
-            'The link opens GitHub&rsquo;s token form with the name, description, lifetime and permissions already filled in — it follows the repository and pull request fields above, so fill those in first.',
-            'One thing the link cannot preselect: on that page choose <strong>Repository access &rarr; Only select repositories</strong> and tick your repository. Then press <em>Generate token</em> and paste the <code>github_pat_...</code> string here — GitHub shows it only once.',
-            'Prefer a classic token? <a href="' . PAT_CLASSIC_URL . '" target="_blank" rel="noopener">this link</a> preselects the full <code>repo</code> scope (<code>public_repo</code> alone is not enough).',
-        ]
-    );
-
-    setup_field(
-        'timezone', 'Timezone',
-        $timezone, 'UTC', false,
-        [
-            'IANA timezone name. Used for the timestamps in the run banner.',
-            'Common values: <code>UTC</code>, <code>Europe/Moscow</code>, <code>Europe/London</code>, <code>America/New_York</code>, <code>Asia/Tokyo</code>.',
-            'Full list: <code>php.net/manual/en/timezones.php</code>.',
-        ]
-    );
-
-    setup_field(
-        'keep_files', 'Files to preserve',
-        $keep, 'pull.php, pull-config.php', false,
-        [
-            'Comma- or space-separated top-level filenames in this directory that must NOT be overwritten on pull.',
-            '<code>pull.php</code> and <code>pull-config.php</code> are always preserved automatically — list any other names here.',
-            'Examples: <code>.htaccess</code>, <code>index.html</code>, uploaded media folder names.',
-        ],
-        true
-    );
-
-    setup_field(
-        'password', 'Password to run the deploy',
-        '', 'leave empty for no password', true,
-        [
-            'Asked before every pull. Stored hashed in <code>pull-config.php</code> — the password itself is never written to disk.',
-            'The unlock screen offers <strong>&laquo;remember me&raquo;</strong>: a signed cookie valid 30 days, so you are not asked again on this browser. Unchecked, it lasts only until the browser closes.',
-            'From cron, send it as a header instead: <code>curl -H "X-Pull-Password: ..." "https://host/pull.php?plain=1"</code>.',
-            'Leave empty to keep the deploy open to anyone who knows the URL.',
-        ]
-    );
-
-    setup_check(
-        'auto_pull', 'Track the ref and deploy on its own when it moves',
-        $autoPull,
-        [
-            'Adds the tracking screen at <code>pull.php?watch=1</code>: it keeps comparing the deployed commit with the head on GitHub and starts a deploy the moment a new commit shows up. It runs for as long as that page stays open.',
-            'For an unattended server use cron instead: <code>curl -s "https://host/pull.php?check=1&amp;plain=1"</code>. With <code>check=1</code> nothing is downloaded while the commit has not changed.',
-            'The commit that is currently live is written to <code>pull-state.json</code> next to this script — that file is what makes &laquo;deploy only what changed&raquo; possible, and it is never overwritten by a pull.',
-            'Off: nothing happens on its own, the tracking screen still works but only deploys when you press the button.',
-        ]
-    );
-
-    setup_field(
-        'auto_interval', 'Check interval, seconds',
-        $interval, '60', false,
-        [
-            'How often the tracking screen asks GitHub for the current head commit. Minimum ' . AUTO_INTERVAL_MIN . ' seconds.',
-            'One check is one API request. A token is allowed 5000 requests per hour, so 60 seconds (60 per hour) leaves plenty of room.',
-        ]
-    );
-
-    setup_check(
-        'purge', 'Delete files that are gone from the repository',
-        $purge,
-        [
-            'Runs after each copy and makes this directory an exact mirror of the repo folder: anything not in the repo is deleted.',
-            'Off: files deleted from the repo stay on the server forever and pile up.',
-            'Files listed above under &laquo;Files to preserve&raquo; are never touched. Deletion is skipped entirely if the download or unpack fails.',
-        ],
-        'Irreversible: deleted files go straight from disk, not to a recycle bin. Anything created on the server and absent from the repo — uploads, caches, logs — is lost unless it is in the preserve list.'
-    );
-
-    echo "<button type=\"submit\" class=\"btn\">$ save_config</button>";
-    echo "</form>";
-    echo "</div>"; // .term
-    echo "<script>window.__intro = {$introJson};</script>";
-    echo terminal_js(true);
-    echo "</body></html>";
+    if (isset($_GET['lang']) && in_array($_GET['lang'], ['ru', 'en'], true)) $_SESSION['pull_language'] = $_GET['lang'];
+    $country = strtoupper((string)($_SERVER['GEOIP_COUNTRY_CODE'] ?? getenv('GEOIP_COUNTRY_CODE') ?: ''));
+    if ($country === '' && getenv('PULL_TRUST_CLOUDFLARE') === '1') $country = strtoupper((string)($_SERVER['HTTP_CF_IPCOUNTRY'] ?? ''));
+    if ($country === '' && function_exists('geoip_country_code_by_name')) $country = (string)@geoip_country_code_by_name((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+    $GLOBALS['pull_language'] = $_SESSION['pull_language'] ?? (in_array($country, ['RU', 'BY', 'KZ'], true) ? 'ru' : 'en');
+    if (empty($_SESSION['pull_csrf'])) $_SESSION['pull_csrf'] = bin2hex(random_bytes(24));
 }
-
-function setup_field(string $name, string $label, string $value, string $placeholder, bool $password, array $help, bool $textarea = false): void {
-    echo "<div class=\"fld\">";
-    echo "<label for=\"f_{$name}\"><span class=\"prompt\">&gt;</span> {$label}</label>";
-    echo "<div class=\"help\">";
-    foreach ($help as $h) echo "<div>" . $h . "</div>";
-    echo "</div>";
-    if ($textarea) {
-        echo "<textarea id=\"f_{$name}\" name=\"{$name}\" rows=\"2\" placeholder=\"{$placeholder}\">{$value}</textarea>";
-    } else {
-        $type = $password ? 'password' : 'text';
-        $auto = $password ? ' autocomplete="new-password"' : '';
-        echo "<input id=\"f_{$name}\" name=\"{$name}\" type=\"{$type}\" placeholder=\"{$placeholder}\" value=\"{$value}\"{$auto}>";
+function csrf_field(): string { return '<input type="hidden" name="csrf" value="' . h($_SESSION['pull_csrf']) . '">'; }
+function check_csrf(): void {
+    if (!hash_equals((string)($_SESSION['pull_csrf'] ?? ''), (string)($_POST['csrf'] ?? '')) || empty($_SESSION['pull_csrf'])) {
+        http_response_code(403);
+        page_start(ui('Please reload the page', 'Обновите страницу'));
+        echo '<p>' . ui('This form has expired. Reload the page and try again.', 'Форма устарела. Обновите страницу и повторите действие.') . '</p>';
+        page_end(); exit;
     }
-    echo "</div>";
 }
-
-function setup_check(string $name, string $label, bool $checked, array $help, string $warning = ''): void {
-    $on = $checked ? ' checked' : '';
-    echo "<div class=\"fld\">";
-    echo "<label class=\"chk\" for=\"f_{$name}\">";
-    echo "<input id=\"f_{$name}\" name=\"{$name}\" type=\"checkbox\" value=\"1\"{$on}>";
-    echo "<span class=\"t\">{$label}</span></label>";
-    echo "<div class=\"help\">";
-    foreach ($help as $h) echo "<div>" . $h . "</div>";
-    if ($warning !== '') echo "<div class=\"warn\">&#9888; " . $warning . "</div>";
-    echo "</div>";
-    echo "</div>";
+function page_start(string $title): void {
+    header('Content-Type: text/html; charset=utf-8'); header('Cache-Control: no-store');
+    header('Referrer-Policy: same-origin'); header('X-Content-Type-Options: nosniff');
+    echo '<!doctype html><html lang="' . h($GLOBALS['pull_language']) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>' . h($title) . ' · NeuroSaaS</title>' . terminal_css() . '</head><body><main><header><a class="brand" href="?">NeuroSaaS <small>control panel</small></a><nav><a href="?lang=ru">Русский</a> · <a href="?lang=en">English</a> · <a href="./">' . ui('Open service', 'Открыть сервис') . '</a></nav></header><h1>' . h($title) . '</h1>';
 }
-
-function render_setup_done(array $config): void {
-    $h = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
-    header('Content-Type: text/html; charset=utf-8');
-    echo "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">";
-    echo "<title>pull.php — setup complete</title>";
-    echo terminal_css();
-    echo "</head><body><div class=\"term\"><div class=\"bar\">";
-    echo "<span class=\"dot r\"></span><span class=\"dot y\"></span><span class=\"dot g\"></span>";
-    echo "<span class=\"title\">pull.php — setup complete</span>";
-    echo "<a class=\"home\" href=\"/\" title=\"Go to site root\">⌂ site root</a></div>";
-    echo "<pre class=\"out\">";
-    echo "$ pull-config.php written\n";
-    echo "  repo:     " . $h($config['repo']) . "\n";
-    echo "  branch:   " . $h($config['branch']) . "\n";
-    echo "  subdir:   " . $h($config['subdir']) . "\n";
-    echo "  timezone: " . $h($config['timezone']) . "\n";
-    echo "  password: " . ($config['password_hash'] !== '' ? "set (asked before every pull)" : "not set (anyone with the URL can deploy)") . "\n";
-    echo "  purge:    " . ($config['purge'] ? "on — files missing from the repo are deleted, irreversibly" : "off — obsolete files stay in place") . "\n";
-    echo "  tracking: " . ($config['source'] === 'pr'
-        ? "pull request #" . $h($config['pr_number']) . " (its head commit is deployed)"
-        : "branch " . $h($config['branch'])) . "\n";
-    echo "  auto:     " . ($config['auto_pull']
-        ? "on — the tracking screen deploys a new commit within " . $h($config['auto_interval']) . "s"
-        : "off — deploys only when you ask for one") . "\n\n";
-    echo "# tracking screen:  pull.php?watch=1\n";
-    echo "# deployed versions / rollback:  pull.php?history=1\n";
-    echo "# deploy if changed: curl -s \"https://host/pull.php?check=1&plain=1\"   (for cron)\n";
-    echo "# delete pull-config.php to re-run setup.\n";
-    echo "</pre>";
-    echo "<a class=\"btn\" href=\"pull.php\">$ run_pull_now</a>";
-    echo "<a class=\"btn\" href=\"pull.php?watch=1\">$ open_tracking</a>";
-    echo "</div></body></html>";
+function page_end(): void {
+    echo '<footer>' . ui('Need advice or a custom improvement?', 'Нужна консультация или доработка?') . ' <a href="https://dansury.github.io" target="_blank" rel="noopener">dansury.github.io</a> · <a href="https://t.me/dansury.vj" target="_blank" rel="noopener">Telegram: dansury.vj</a></footer></main></body></html>';
 }
-
-// ---------- CSS / JS ----------
-
 function terminal_css(): string {
-    return <<<CSS
+    return <<<'CSS'
 <style>
-:root{
-  --bg:#2b2b2b;--bg2:#1f1f1f;--bar:#3a3a3a;--fg:#e6e6e6;--mute:#9aa0a6;
-  --green:#7CFFB2;--cyan:#5fd7ff;--yellow:#ffd866;--red:#ff6b6b;--accent:#7CFFB2;
-}
-*{box-sizing:border-box}
-html,body{margin:0;padding:0;background:var(--bg2);color:var(--fg);
-  font-family:'JetBrains Mono','Fira Code',Menlo,Consolas,'Courier New',monospace;
-  font-size:14px;line-height:1.55}
-.term{max-width:880px;margin:2rem auto;background:var(--bg);
-  border:1px solid #444;border-radius:8px;
-  box-shadow:0 8px 28px rgba(0,0,0,.45);overflow:hidden}
-.bar{display:flex;align-items:center;gap:6px;background:var(--bar);
-  padding:8px 12px;border-bottom:1px solid #4a4a4a}
-.dot{width:12px;height:12px;border-radius:50%}
-.dot.r{background:#ff5f56}.dot.y{background:#ffbd2e}.dot.g{background:#27c93f}
-.bar .title{margin-left:10px;color:#cfcfcf;font-size:12px;letter-spacing:.2px}
-.bar .home{margin-left:auto;color:var(--accent);text-decoration:none;font-size:12px;
-  border:1px solid var(--accent);border-radius:4px;padding:2px 8px;white-space:nowrap}
-.bar .home:hover{background:var(--accent);color:#1a1a1a}
-.out{margin:0;padding:18px 20px;white-space:pre-wrap;word-break:break-word;
-  color:var(--fg);min-height:60px}
-.out .line{display:block;white-space:pre-wrap}
-.out .line::before{content:""}
-.out .line.is-cmd{color:var(--accent)}
-.out .line.is-err{color:var(--red)}
-.out .line.is-cmt{color:var(--mute)}
-.out .line.is-info{color:var(--cyan)}
-.out .line.is-warn{color:var(--yellow)}
-.out .caret{display:inline-block;width:8px;height:1em;
-  background:var(--accent);vertical-align:-2px;
-  animation:blink 1s steps(1) infinite}
-@keyframes blink{50%{opacity:0}}
-.form{padding:6px 20px 22px}
-.form.hidden{display:none}
-.fld{margin:18px 0}
-.fld label{display:block;color:var(--accent);font-weight:600;margin-bottom:4px}
-.fld .prompt{color:var(--cyan);margin-right:6px}
-.fld .help{color:var(--mute);font-size:12.5px;margin:2px 0 8px;padding-left:18px}
-.fld .help code{background:#1a1a1a;padding:1px 6px;border-radius:3px;color:#d7d7d7}
-.fld .help a{color:var(--cyan)}
-.fld input,.fld textarea{
-  width:100%;background:#1a1a1a;color:var(--fg);
-  border:1px solid #4a4a4a;border-radius:4px;
-  padding:9px 11px;font:inherit;outline:none;caret-color:var(--accent)}
-.fld input:focus,.fld textarea:focus{border-color:var(--accent)}
-.fld textarea{resize:vertical}
-.chk{display:flex;align-items:flex-start;gap:10px;margin:0 0 6px;
-  color:var(--accent);font-weight:600;cursor:pointer}
-.chk input[type=checkbox]{width:16px;height:16px;flex:0 0 auto;margin:3px 0 0;
-  accent-color:var(--accent);cursor:pointer}
-.chk .t{display:block;font-weight:600}
-.chk .note{display:block;color:var(--mute);font-weight:400;font-size:12.5px;margin-top:4px}
-.chk .note code{background:#1a1a1a;padding:1px 6px;border-radius:3px;color:#d7d7d7}
-.fld .help .warn{color:var(--yellow);margin-top:6px}
-.out .is-cmt{color:var(--mute)}
-.out .is-err{color:var(--red)}
-.btn{display:inline-block;margin:8px 20px 22px;padding:10px 18px;
-  background:#1a1a1a;color:var(--accent);
-  border:1px solid var(--accent);border-radius:4px;
-  font:inherit;cursor:pointer;text-decoration:none}
-.btn:hover{background:var(--accent);color:#1a1a1a}
-.btn:disabled{opacity:.45;cursor:default}
-.btn:disabled:hover{background:#1a1a1a;color:var(--accent)}
-.bar .home + .home{margin-left:8px}
-.mute{color:var(--mute)}
-/* prefilled token link in the setup form */
-.help .patbtn{display:inline-block;margin:8px 0 2px;padding:7px 13px;
-  background:#1a1a1a;color:var(--accent);border:1px solid var(--accent);
-  border-radius:4px;text-decoration:none;font-size:12.5px}
-.help .patbtn:hover{background:var(--accent);color:#1a1a1a}
-.help .perms{display:block;color:var(--yellow);margin-top:4px}
-/* tracking screen */
-.panel{padding:14px 20px;background:#262626;border-bottom:1px solid #3a3a3a}
-.panel .row{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:2px 0}
-.panel .k{flex:0 0 108px;color:var(--mute);white-space:nowrap}
-.panel .v{flex:1 1 240px;word-break:break-word}
-.panel .v a{color:var(--cyan)}
-.panel .is-ok{color:var(--green)}
-.panel .is-warn{color:var(--yellow)}
-.panel .is-err{color:var(--red)}
-.ctl{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
-  padding:12px 20px;border-bottom:1px solid #3a3a3a}
-.ctl .btn{margin:0;padding:7px 14px}
-.ctl .chk{margin:0;font-size:13px}
-.panel ~ .out{max-height:55vh;overflow:auto}
-.vlist ~ .out{max-height:none}
-/* deploy log / rollback */
-.vlist{padding:4px 20px 10px}
-.ventry{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;
-  padding:11px 0;border-bottom:1px solid #383838}
-.ventry:last-child{border-bottom:none}
-.ventry.live{background:#252f28;margin:0 -20px;padding-left:20px;padding-right:20px}
-.ventry .when{flex:0 0 170px;color:var(--cyan)}
-.ventry .when .age{display:block;color:var(--mute);font-size:12px}
-.ventry .sha{flex:0 0 70px;color:var(--fg)}
-.ventry .what{flex:1 1 220px;color:var(--mute);word-break:break-word}
-.ventry .what .files{display:block;font-size:12px;color:#7a7f85}
-.ventry .tag{color:var(--yellow);border:1px solid var(--yellow);border-radius:3px;
-  padding:0 5px;font-size:11px;margin-left:4px}
-.ventry .nowtag{flex:0 0 auto;color:var(--green);border:1px solid var(--green);
-  border-radius:4px;padding:5px 12px;font-size:12.5px}
-.ventry form{margin:0;flex:0 0 auto}
-.ventry .btn{margin:0;padding:5px 12px;font-size:12.5px}
+:root{color-scheme:light;--ink:#17243b;--muted:#56657a;--accent:#2357cc;--border:#d9e1ed}
+*{box-sizing:border-box}body{margin:0;background:#f2f5fa;color:var(--ink);font:16px/1.6 system-ui,-apple-system,sans-serif}main{max-width:1040px;margin:auto;padding:28px 22px}header{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:38px}.brand{font-size:23px;font-weight:750;text-decoration:none}.brand small{display:block;color:var(--muted);font-size:12px;font-weight:500}a{color:var(--accent)}nav{font-size:14px}h1{font-size:32px;line-height:1.2}h2{font-size:22px;margin-top:0}h3{font-size:18px}section,.card{background:white;border:1px solid var(--border);border-radius:16px;padding:26px;margin:20px 0;box-shadow:0 5px 20px #1b355507}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.grid section{margin:0}p,.help{color:var(--muted)}label{display:block;font-weight:600;margin:16px 0 4px}label.check{display:flex;align-items:flex-start;gap:10px;font-weight:500}input:not([type=checkbox]),textarea,select{font:inherit;width:100%;padding:10px 12px;border:1px solid #bcc9dc;border-radius:8px;background:white;color:var(--ink)}input[type=checkbox]{width:18px;height:18px;margin-top:4px}input:focus,textarea:focus,select:focus{outline:3px solid #b5cdfc;outline-offset:1px}.help{font-size:14px;margin:5px 0 14px}button,.button{display:inline-block;font:inherit;font-weight:600;background:var(--accent);color:white;border:0;border-radius:9px;padding:11px 18px;cursor:pointer;text-decoration:none;margin:12px 8px 0 0}button:disabled{opacity:.5;cursor:wait}button.secondary{background:#e8effd;color:#244c9c}details{border:1px solid var(--border);border-radius:10px;padding:16px;margin:16px 0}summary{cursor:pointer;font-weight:650}pre,code{overflow-wrap:anywhere;white-space:pre-wrap;font-size:13px}pre{background:#f3f6fb;padding:18px;border-radius:9px;max-height:400px;overflow:auto}.notice{border-left:4px solid var(--accent);background:#edf3ff;padding:14px 18px;border-radius:7px}.error{border-color:#bb304b;background:#fff0f3;color:#86283b}.success{border-color:#14805d;background:#eaf8f2;color:#115c45}.status{font-size:20px;font-weight:650}footer{border-top:1px solid var(--border);margin-top:36px;padding:22px 0;color:var(--muted);font-size:14px}.row{padding:15px 0;border-bottom:1px solid var(--border)}.inline{display:inline-block;margin-right:10px}[hidden]{display:none!important}@media(max-width:600px){main{padding:18px 14px}section,.card{padding:19px}h1{font-size:27px}}
 </style>
 CSS;
 }
-
-function history_js(): string {
-    return <<<'JS'
-<script>
-(function(){
-  // Rolling back overwrites the live site, so make it a deliberate click.
-  document.querySelectorAll('form.rb button').forEach(btn => {
-    btn.addEventListener('click', ev => {
-      const ok = confirm('Roll back to ' + btn.dataset.sha + ' (deployed ' + btn.dataset.at + ')?\n\n' +
-        'That commit is deployed again over this directory, and automatic deploys ' +
-        'pause until you deploy the tracked head.');
-      if (!ok) ev.preventDefault();
-    });
-  });
-})();
-</script>
-JS;
+function field(string $name, string $label, string $value, string $help = '', string $type = 'text'): void {
+    echo '<label for="f_' . h($name) . '">' . h($label) . '</label>';
+    if ($type === 'textarea') echo '<textarea rows="5" id="f_' . h($name) . '" name="' . h($name) . '">' . h($value) . '</textarea>';
+    else echo '<input id="f_' . h($name) . '" name="' . h($name) . '" type="' . h($type) . '" value="' . h($value) . '"' . ($type === 'password' ? ' autocomplete="new-password"' : '') . '>';
+    if ($help !== '') echo '<p class="help">' . h($help) . '</p>';
 }
-
-function watch_js(): string {
-    return <<<'JS'
-<script>
-(function(){
-  const cfg    = window.__watch || {interval: 60, auto: false};
-  const panel  = document.getElementById('panel');
-  const out    = document.getElementById('out');
-  const autoEl = document.getElementById('auto');
-  const nowEl  = document.getElementById('now');
-  const tickEl = document.getElementById('tick');
-  const every  = Math.max(15, cfg.interval | 0);
-  let running = false, left = 0, lastSha = null;
-
-  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g,
-    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-
-  function line(text, cls){
-    const n = document.createElement('span');
-    n.className = 'line' + (cls || '');
-    n.textContent = text;
-    out.appendChild(n);
-    out.appendChild(document.createTextNode('\n'));
-    out.scrollTop = out.scrollHeight;
-  }
-
-  function classify(t){
-    const s = t.trim();
-    if (!s) return '';
-    if (/^(error:|!)/.test(s))            return ' is-err';
-    if (s.startsWith('warning:'))         return ' is-err';
-    if (/^(purge:|deleted|DELETED:)/.test(s)) return ' is-warn';
-    if (s.startsWith('#'))                return ' is-cmt';
-    if (s.startsWith('==='))              return ' is-cmd';
-    if (/^(START|END|STATUS|DURATION|FILES|COMMIT|tracking|head|check):/.test(s)) return ' is-info';
-    return '';
-  }
-
-  function row(k, v, cls){
-    return '<div class="row"><span class="k">' + esc(k) + '</span>' +
-           '<span class="v' + (cls || '') + '">' + v + '</span></div>';
-  }
-
-  function render(s){
-    if (s.auth === false){
-      panel.innerHTML = row('status', '<span class="is-err">session expired — reload and unlock</span>');
-      return false;
+function checkbox(string $name, string $label, bool $checked): void {
+    echo '<label class="check"><input type="checkbox" name="' . h($name) . '" value="1"' . ($checked ? ' checked' : '') . '><span>' . h($label) . '</span></label>';
+}
+function render_login_form(array $errors = []): void {
+    page_start(ui('Sign in to manage your service', 'Вход в управление сервисом'));
+    foreach ($errors as $e) echo '<p class="notice error">' . ui('Password required or incorrect. Please try again.', 'Введите пароль. Если пароль неверный, попробуйте ещё раз.') . '</p>';
+    echo '<section><p>' . ui('Use the password chosen when this server was set up.', 'Используйте пароль, который указали при настройке этого сервера.') . '</p><form method="post">' . csrf_field();
+    field('password', ui('Password', 'Пароль'), '', '', 'password');
+    checkbox('remember', ui('Remember me for 30 days on this device', 'Запомнить меня на этом устройстве на 30 дней'), false);
+    echo '<button>' . ui('Sign in', 'Войти') . '</button></form></section>'; page_end();
+}
+function render_setup_form(array $values = [], array $errors = []): void {
+    page_start(ui('Connect your GitHub repository', 'Подключите репозиторий GitHub'));
+    echo '<p>' . ui('This assistant copies your project to this server. Start with the repository and access key; each setting is explained below.', 'Этот помощник переносит проект на сервер. Начните с репозитория и ключа доступа — у каждого параметра есть пояснение.') . '</p>';
+    foreach ($errors as $error) echo '<p class="notice error">' . h(setup_error($error)) . '</p>';
+    echo '<section><form method="post">' . csrf_field();
+    field('repo', ui('Repository', 'Репозиторий'), $values['repo'] ?? '', ui('Copy owner/name from github.com/owner/name.', 'Скопируйте owner/name из адреса github.com/owner/name.'));
+    field('branch', ui('Branch', 'Ветка'), $values['branch'] ?? 'main', ui('Usually main. Updates are taken from this branch.', 'Обычно main. Обновления будут браться из этой ветки.'));
+    field('gh_token', ui('GitHub access key', 'Ключ доступа GitHub'), '', ui('Required for feedback and private repositories. The key stays on this server.', 'Нужен для обратной связи и закрытых репозиториев. Ключ хранится только на сервере.'), 'password');
+    echo '<a id="patbtn" class="button" target="_blank" rel="noopener" href="' . h(pat_url($values['repo'] ?? '', !empty($values['pr_number']))) . '">' . ui('Create access key', 'Создать ключ доступа') . '</a><p class="help">' . ui('Choose Only select repositories and select your repository. Permissions: Contents — Read, Issues — Read and write; Pull requests — Read for previews. Copy the generated key here.', 'Выберите Only select repositories и отметьте свой репозиторий. Права: Contents — Read, Issues — Read and write; для предпросмотра ещё Pull requests — Read. Скопируйте созданный ключ сюда.') . '</p>';
+    field('password', ui('Panel password', 'Пароль панели'), '', ui('At least 6 characters. Without a password, anyone with this URL can deploy and use feedback or AI tests.', 'Не менее 6 символов. Без пароля любой, кто знает адрес, сможет обновлять сервис, отправлять отзывы и проверять нейросети.'), 'password');
+    checkbox('auto_pull', ui('Automatically install updates while the panel is open', 'Автоматически устанавливать обновления, пока панель открыта'), (bool)($values['auto_pull'] ?? true));
+    field('auto_interval', ui('Check every, seconds', 'Проверять каждые, секунд'), (string)($values['auto_interval'] ?? 60), ui('Minimum 15 seconds. 60 seconds is a good starting point.', 'Минимум 15 секунд. Для начала подойдёт 60.'), 'number');
+    echo '<details><summary>' . ui('Advanced settings', 'Дополнительные настройки') . '</summary>';
+    field('subdir', ui('Project folder in repository', 'Папка проекта в репозитории'), $values['subdir'] ?? '.', ui('A dot means the entire repository; otherwise use a path such as public.', 'Точка означает весь репозиторий. Для отдельной папки укажите путь, например public.'));
+    field('pr_number', ui('Preview pull request number', 'Номер pull request для предпросмотра'), (string)($values['pr_number'] ?? ''), ui('Leave empty to follow the branch. After merging a preview, clear pr_number in pull-config.php to follow main.', 'Оставьте пустым для обновлений из ветки. После слияния предпросмотра очистите pr_number в pull-config.php, чтобы следить за main.'));
+    field('timezone', ui('Time zone', 'Часовой пояс'), $values['timezone'] ?? 'Europe/Moscow', ui('For example Europe/Moscow or UTC.', 'Например Europe/Moscow или UTC.'));
+    field('keep_files', ui('Files and folders to preserve', 'Файлы и папки, которые нужно сохранить'), $values['keep_files'] ?? '', ui('Separate names with commas: uploads, data, .env. Panel settings and keys are always preserved.', 'Разделяйте имена запятыми: uploads, data, .env. Настройки панели и ключи всегда сохраняются.'));
+    checkbox('purge', ui('Delete server files that no longer exist in the repository', 'Удалять с сервера файлы, которых больше нет в репозитории'), (bool)($values['purge'] ?? false));
+    echo '<p class="help">' . ui('Deletion is permanent. Preserve uploads, data and local secrets above first.', 'Удаление необратимо. Сначала укажите выше папки загрузок, данных и локальные секреты.') . '</p></details><button>' . ui('Save and continue', 'Сохранить и продолжить') . '</button></form></section>';
+    echo '<script>const repo=document.querySelector("#f_repo"),pr=document.querySelector("#f_pr_number"),link=document.querySelector("#patbtn");function tokenLink(){const u=new URL(link.href);u.searchParams.set("target_name",repo.value.split("/")[0]);if(pr.value)u.searchParams.set("pull_requests","read");else u.searchParams.delete("pull_requests");link.href=u.toString()}repo.addEventListener("input",tokenLink);pr.addEventListener("input",tokenLink);</script>';
+    page_end();
+}
+function setup_error(string $message): string {
+    $map = [
+        'password must be at least 6 characters (or empty for no password)' => 'Пароль должен содержать не менее 6 символов (или оставьте пустым).',
+        'repo must look like "owner/name"' => 'Укажите репозиторий в формате owner/name.',
+        'invalid timezone (e.g. "Europe/Moscow", "UTC")' => 'Укажите правильный часовой пояс, например Europe/Moscow или UTC.',
+        'pull request must be a number (e.g. 42), or empty to track the branch' => 'Номер pull request должен быть числом, например 42. Для ветки оставьте пустым.',
+        'pull request number must be 1 or greater' => 'Номер pull request должен быть больше нуля.',
+        'pull request tracking needs a token with Pull requests: Read — use the link above to create one' => 'Для предпросмотра нужен ключ с правом Pull requests: Read. Создайте его по ссылке выше.',
+        'cannot write pull-config.php — check directory permissions' => 'Не удалось сохранить настройки. Проверьте права записи в папку на хостинге.',
+    ];
+    if (strpos($message, 'check interval must') === 0) return ui($message, 'Интервал проверки должен быть не менее 15 секунд.');
+    return ui($message, $map[$message] ?? $message);
+}
+function render_setup_done(array $config): void {
+    page_start(ui('Your connection is ready', 'Подключение настроено'));
+    echo '<section><p>' . ui('Settings saved. Open the panel to install your first version and set up AI connections.', 'Настройки сохранены. Откройте панель, чтобы установить первую версию и подключить нейросети.') . '</p><a class="button" href="?">' . ui('Open control panel', 'Открыть панель') . '</a></section>'; page_end();
+}
+function start_output(bool $plain): void {
+    $GLOBALS['TERM_PLAIN'] = $plain;
+    if ($plain) { header('Content-Type: text/plain; charset=utf-8'); return; }
+    page_start(ui('Updating your service', 'Обновление сервиса'));
+    echo '<section><p>' . ui('Please wait. Your files are being updated. The result will appear below.', 'Подождите: файлы сервиса обновляются. Результат появится ниже.') . '</p><details><summary>' . ui('Technical details for support', 'Технические сведения для поддержки') . '</summary><pre>';
+    if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+}
+function term(string $msg): void { echo !empty($GLOBALS['TERM_PLAIN']) ? $msg . "\n" : h($msg) . "\n"; }
+function end_output(): void { if (empty($GLOBALS['TERM_PLAIN'])) { echo '</pre></details><a class="button" href="?">' . ui('Back to panel', 'Вернуться в панель') . '</a></section>'; page_end(); } }
+function render_history_page(array $config): void {
+    page_start(ui('Previous versions', 'Предыдущие версии'));
+    echo '<p>' . ui('Restore a version that was previously installed. Automatic updates pause after a restore; install the latest version to resume.', 'Можно вернуть ранее установленную версию. Автообновление после возврата приостанавливается. Чтобы возобновить его, установите актуальную версию.') . '</p><section>';
+    $state = state_read(); $versions = history_versions($state);
+    if (!$versions) echo '<p>' . ui('No versions installed yet.', 'Пока нет установленных версий.') . '</p>';
+    foreach ($versions as $entry) {
+        echo '<div class="row"><strong>' . h($entry['at'] ?? '') . '</strong> · ' . h(short_sha($entry['sha'])) . ' · ' . h($entry['label'] ?? '');
+        if ($entry['sha'] === ($state['sha'] ?? '')) echo ' — ' . ui('Installed now', 'Установлена сейчас');
+        else echo '<form method="post" action="?" class="inline">' . csrf_field() . '<input type="hidden" name="action" value="deploy"><input type="hidden" name="rollback" value="' . h($entry['sha']) . '"><button class="secondary">' . ui('Restore this version', 'Вернуть эту версию') . '</button></form>';
+        echo '</div>';
     }
-    let head = esc(s.short);
-    if (s.pr){
-      head += ' — ' + esc(s.pr.title || '');
-    } else if (s.commit){
-      head += ' — ' + esc(s.commit.message || '');
+    echo '</section><a href="?">' . ui('Back to panel', 'Вернуться в панель') . '</a>'; page_end();
+}
+function render_watch_page(array $config): void { render_dashboard($config); }
+function render_dashboard(array $config, string $message = '', bool $error = false): void {
+    page_start(ui('Your service, under control', 'Ваш сервис под контролем'));
+    echo '<p>' . h($config['repo']) . ' · ' . h($config['source'] === 'pr' ? 'PR #' . $config['pr_number'] : $config['branch']) . '</p>';
+    if ($message !== '') echo '<p role="status" class="notice ' . ($error ? 'error' : 'success') . '">' . h($message) . '</p>';
+    echo '<section><h2>' . ui('Updates', 'Обновления') . '</h2><p id="status" class="status" role="status">' . ui('Checking for updates…', 'Проверяем обновления…') . '</p><p id="version"></p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="deploy"><button>' . ui('Install latest version', 'Установить актуальную версию') . '</button><a href="?history=1">' . ui('Previous versions', 'Предыдущие версии') . '</a></form><details><summary>' . ui('Automatic update settings', 'Настройки автообновления') . '</summary><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="auto">';
+    checkbox('auto_pull', ui('Install new versions while this panel is open', 'Устанавливать новые версии, пока панель открыта'), $config['auto_pull']);
+    field('auto_interval', ui('Interval in seconds', 'Интервал в секундах'), (string)$config['auto_interval'], ui('At least 15. Closing this page stops browser checks.', 'Не менее 15. После закрытия страницы проверки из браузера прекращаются.'), 'number');
+    echo '<button class="secondary">' . ui('Save settings', 'Сохранить настройки') . '</button></form><p class="help">' . ui('For updates with the browser closed, ask your hosting provider to schedule the following cron command once a minute. If a password is set, pass it through the X-Pull-Password header.', 'Для обновлений при закрытом браузере попросите хостинг запускать эту команду cron раз в минуту. Если задан пароль, передайте его в заголовке X-Pull-Password.') . '</p><code>curl --fail -s -H "X-Pull-Password: YOUR_PANEL_PASSWORD" "https://YOUR_HOST/PATH/pull.php?check=1&amp;plain=1"</code></details></section>';
+    feedback_form();
+    render_ai_settings();
+    echo '<section id="embed-tip"><h2>' . ui('Make feedback easy to find', 'Сделайте обратную связь доступной') . '</h2><p>' . ui('Add this to your next development prompt. Click the text to copy it.', 'Добавьте это в следующий промпт для разработки. Нажмите на текст, чтобы скопировать.') . '</p><button type="button" class="secondary" id="copy-prompt">Embed pull.php feedback form directly into the interface of the service, so that users can immediately submit their complaints directly to the repository.</button><p id="copy-status" role="status"></p><label class="check"><input type="checkbox" id="hide-tip"><span>' . ui('Do not show again', 'Больше не показывать') . '</span></label></section>';
+    $js = ['csrf' => $_SESSION['pull_csrf'], 'interval' => $config['auto_interval'], 'auto' => $config['auto_pull'], 'ru' => $GLOBALS['pull_language'] === 'ru'];
+    echo '<script>window.panelConfig=' . json_encode($js, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>' . panel_js();
+    page_end();
+}
+function feedback_form(): void {
+    echo '<section id="feedback"><h2>' . ui('Tell us what could be better', 'Расскажите, что можно улучшить') . '</h2><p>' . ui('Your message becomes an issue in the connected GitHub repository. Do not include passwords or private customer information.', 'Сообщение станет задачей в подключённом репозитории GitHub. Не указывайте пароли и личные данные клиентов.') . '</p><form method="post" action="?feedback=1">' . csrf_field() . '<input type="hidden" name="action" value="feedback">';
+    field('title', ui('Short title', 'Краткое название'), (string)($_POST['title'] ?? ''), ui('From 3 to 200 characters. What went wrong or what would you like to add?', 'От 3 до 200 символов. Что не работает или что вы хотите добавить?'));
+    field('description', ui('Details', 'Подробности'), (string)($_POST['description'] ?? ''), ui('10–10,000 characters. Describe what you did, what happened, and the result you expected.', '10–10 000 символов. Опишите свои действия, что произошло и какой результат вы ожидали.'), 'textarea');
+    echo '<button>' . ui('Send feedback', 'Отправить отзыв') . '</button></form></section>';
+}
+function render_feedback(string $message = '', bool $error = false, string $url = ''): void {
+    page_start(ui('Feedback', 'Обратная связь'));
+    if ($message !== '') echo '<p role="status" class="notice ' . ($error ? 'error' : 'success') . '">' . h($message) . ($url !== '' ? ' <a target="_blank" rel="noopener" href="' . h($url) . '">' . ui('Open issue', 'Открыть задачу') . '</a>' : '') . '</p>';
+    feedback_form(); page_end();
+}
+function send_feedback(array $config, string $token): void {
+    $title = trim((string)($_POST['title'] ?? '')); $body = trim((string)($_POST['description'] ?? ''));
+    $length = static fn(string $v): int => preg_match_all('/./us', $v) ?: 0;
+    if ($length($title) < 3 || $length($title) > 200 || $length($body) < 10 || $length($body) > 10000) {
+        http_response_code(422); render_feedback(ui('Check the title and description lengths shown below.', 'Проверьте длину названия и описания: ограничения указаны под полями.'), true); return;
     }
-
-    let badge, cls;
-    if (s.error)           { badge = 'error';            cls = ' is-err'; }
-    else if (s.pinned)     { badge = 'pinned to a rolled-back version'; cls = ' is-warn'; }
-    else if (!s.deployed)  { badge = 'never deployed';   cls = ' is-warn'; }
-    else if (s.changed)    { badge = 'new commit ahead'; cls = ' is-warn'; }
-    else                   { badge = 'up to date';       cls = ' is-ok'; }
-
-    let target;
-    if (s.pr){
-      const meta = '[' + esc(s.pr.state) + (s.pr.draft ? ', draft' : '') + '] ' +
-                   esc(s.pr.head) + ' &rarr; ' + esc(s.pr.base) + ' by ' + esc(s.pr.author);
-      target = (s.pr.url ? '<a href="' + esc(s.pr.url) + '" target="_blank" rel="noopener">PR #' + esc(s.pr.number) + '</a>'
-                         : 'PR #' + esc(s.pr.number)) + ' ' + meta;
+    if ($token === '') { http_response_code(422); render_feedback(ui('Add a GitHub key with Issues: Read and write to pull-config.php or GITHUB_TOKEN on your server.', 'Добавьте ключ GitHub с правом Issues: Read and write в pull-config.php или переменную GITHUB_TOKEN на сервере.'), true); return; }
+    if (time() - (int)($_SESSION['feedback_at'] ?? 0) < 60) { http_response_code(429); render_feedback(ui('Please wait a minute before sending another message.', 'Подождите минуту перед следующим сообщением.'), true); return; }
+    // A failed request also starts the cooldown, avoiding accidental repeated submissions.
+    $_SESSION['feedback_at'] = time();
+    [$code, $data] = github_create_feedback($config['repo'], $token, $title, $body);
+    $url = (string)($data['html_url'] ?? '');
+    if ($code !== 201 || strpos($url, 'https://github.com/' . $config['repo'] . '/issues/') !== 0) {
+        http_response_code(502); render_feedback(ui('Could not send feedback (GitHub HTTP ', 'Не удалось отправить отзыв (GitHub HTTP ') . $code . '). ' . ui('Check the key, repository access, Issues: Read and write permission, and that Issues are enabled. Retry after a minute.', 'Проверьте ключ, доступ к репозиторию, право Issues: Read and write и включены ли Issues. Повторите через минуту.'), true); return;
+    }
+    unset($_POST['title'], $_POST['description']); render_feedback(ui('Thank you! Your message was sent.', 'Спасибо! Ваше сообщение отправлено.'), false, $url);
+}
+function github_create_feedback(string $repo, string $token, string $title, string $body): array {
+    $headers = ['Accept: application/vnd.github+json', 'User-Agent: NeuroSaaS-feedback', 'X-GitHub-Api-Version: 2022-11-28', 'Content-Type: application/json', 'Authorization: Bearer ' . $token];
+    $payload = json_encode(['title' => $title, 'body' => $body . "\n\n---\nSubmitted through the service feedback form."], JSON_UNESCAPED_UNICODE);
+    $url = 'https://api.github.com/repos/' . $repo . '/issues'; $code = 0;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => $headers, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 8, CURLOPT_FOLLOWLOCATION => false]);
+        $response = curl_exec($ch); $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
     } else {
-      target = 'branch ' + esc(String(s.ref || '').replace('refs/heads/', ''));
+        $context = stream_context_create(['http' => ['method' => 'POST', 'header' => implode("\r\n", $headers), 'content' => $payload, 'timeout' => 20, 'ignore_errors' => true, 'follow_location' => 0]]);
+        $response = @file_get_contents($url, false, $context);
+        foreach ($http_response_header ?? [] as $line) if (preg_match('~^HTTP/\S+\s+(\d{3})~', $line, $m)) $code = (int)$m[1];
     }
-
-    panel.innerHTML =
-      row('state',    esc(badge), cls) +
-      row('repo',     esc(s.repo)) +
-      row('tracking', target) +
-      row('head',     head) +
-      row('deployed', s.deployed
-            ? esc(s.deployed_short) + ' <span class="mute">at ' + esc(s.deployed_at) + '</span>'
-            : '<span class="mute">nothing deployed from here yet</span>') +
-      (s.pinned ? row('pinned', 'rolled back on ' + esc(s.pinned_at) +
-            ' — auto-deploy paused. <a href="?history=1">versions</a>, or press deploy_now to return to the head.',
-            ' is-warn') : '') +
-      (s.error ? row('note', esc(s.error), ' is-err') : '') +
-      row('checked',  esc(s.now) + ' <span class="mute">(' + esc(s.tz) + ')</span>');
-
-    // Announce a moving head once, so the log reads as a timeline rather than a poll dump.
-    if (s.sha && lastSha && s.sha !== lastSha){
-      line('head moved: ' + lastSha.slice(0,7) + ' -> ' + s.sha.slice(0,7), ' is-warn');
-    }
-    if (s.sha) lastSha = s.sha;
-    return true;
-  }
-
-  async function poll(){
-    let res;
-    try {
-      res = await fetch('?status=1&_=' + Date.now(), {cache:'no-store', headers:{'Accept':'application/json'}});
-    } catch (e){
-      line('status check failed: ' + e.message, ' is-err');
-      return null;
-    }
-    let data;
-    try { data = await res.json(); }
-    catch (e){ line('status check returned no JSON (HTTP ' + res.status + ')', ' is-err'); return null; }
-    render(data);
-    return data;
-  }
-
-  async function deploy(reason){
-    if (running) return;
-    running = true;
-    nowEl.disabled = true;
-    line('');
-    line('$ pull.php — ' + reason, ' is-cmd');
-    try {
-      const res = await fetch('?plain=1&_=' + Date.now(), {cache:'no-store'});
-      if (res.status === 401){
-        line('unauthorized — reload the page and unlock', ' is-err');
-      } else if (res.body && res.body.getReader){
-        const reader = res.body.getReader();
-        const dec = new TextDecoder();
-        let buf = '';
-        for (;;){
-          const {value, done} = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, {stream:true});
-          let i;
-          while ((i = buf.indexOf('\n')) >= 0){
-            const t = buf.slice(0, i);
-            buf = buf.slice(i + 1);
-            line(t, classify(t));
-          }
-        }
-        if (buf) line(buf, classify(buf));
-      } else {
-        // Older browsers: no streaming, so show the whole run once it finishes.
-        (await res.text()).split('\n').forEach(t => line(t, classify(t)));
-      }
-    } catch (e){
-      line('deploy request failed: ' + e.message, ' is-err');
-    }
-    running = false;
-    nowEl.disabled = false;
-    await poll();
-  }
-
-  async function cycle(){
-    const s = await poll();
-    // A pinned directory is sitting on a rollback on purpose — never deploy over it
-    // by ourselves; only the explicit deploy_now button leaves that state.
-    if (s && s.changed && !s.pinned && autoEl.checked && !running){
-      await deploy('auto-deploy: tracked head moved');
-    }
-    left = every;
-  }
-
-  nowEl.addEventListener('click', () => deploy('manual deploy'));
-  autoEl.addEventListener('change', () => {
-    line(autoEl.checked ? 'auto-deploy: on' : 'auto-deploy: off (this browser tab only)', ' is-cmt');
-    if (autoEl.checked) cycle();
-  });
-
-  setInterval(() => {
-    tickEl.textContent = running
-      ? 'deploying…'
-      : 'next check in ' + Math.max(0, left) + 's';
-    if (--left <= 0 && !running) cycle();
-  }, 1000);
-
-  line('$ watching every ' + every + 's — auto-deploy is ' + (autoEl.checked ? 'on' : 'off'), ' is-cmd');
-  if (cfg.pinned) line('pinned to a rolled-back version — auto-deploy stays paused until you deploy the head', ' is-warn');
-  cycle();
-})();
-</script>
-JS;
+    return [$code, json_decode((string)$response, true) ?: []];
 }
-
-function terminal_js(bool $isForm = false): string {
-    if ($isForm) {
-        // Setup form: type the intro lines, then reveal the form.
-        return <<<'JS'
-<script>
-(function(){
-  const intro = window.__intro || [];
-  const host  = document.getElementById('intro');
-  const form  = document.getElementById('setup');
-  let speed = 7, skipped = false;
-
-  function skip(){ skipped = true; speed = 0; }
-  document.addEventListener('click', skip, {once:false});
-  document.addEventListener('keydown', skip, {once:false});
-
-  async function typeLine(node, text){
-    for (let i = 0; i < text.length; i++){
-      node.append(text[i]);
-      if (!skipped) await new Promise(r => setTimeout(r, speed));
+function ai_config(): array {
+    require_once __DIR__ . '/lib/llm.php';
+    $saved = is_file(__DIR__ . '/ai-config.php') ? require __DIR__ . '/ai-config.php' : [];
+    return array_replace_recursive(LLM::defaults(), is_array($saved) ? $saved : []);
+}
+function render_ai_settings(): void {
+    echo '<section><h2>' . ui('AI connections', 'Подключение нейросетей') . '</h2><p>' . ui('Connect one or more providers. If the first provider fails, the next configured provider is tried.', 'Подключите одного или нескольких провайдеров. Если первый не ответит, запрос перейдёт к следующему настроенному.') . '</p>';
+    if (!is_file(__DIR__ . '/lib/llm.php')) { echo '<p>' . ui('Install the latest version first to load the AI connection module.', 'Сначала установите актуальную версию, чтобы загрузить модуль подключения нейросетей.') . '</p></section>'; return; }
+    $cfg = ai_config();
+    echo '<form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="ai">';
+    field('order', ui('Provider order', 'Порядок провайдеров'), implode(', ', $cfg['order']), ui('Comma-separated: yandex, genrouter, openrouter. Disabled providers are skipped.', 'Через запятую: yandex, genrouter, openrouter. Отключённые провайдеры пропускаются.'));
+    foreach (LLM::PROVIDERS as $provider) {
+        $p = $cfg[$provider];
+        echo '<details' . ($provider === 'yandex' ? ' open' : '') . '><summary>' . h(ucfirst($provider)) . '</summary>';
+        if ($provider === 'openrouter') echo '<p class="notice">' . ui('OpenRouter may not work from Russian hosting providers. Test it from this server or configure a proxy for this provider.', 'OpenRouter может не работать на российских хостингах. Проверьте доступ с этого сервера или настройте прокси для этого провайдера.') . '</p>';
+        echo '<p class="help"><a target="_blank" rel="noopener" href="' . ($provider === 'yandex' ? 'https://console.yandex.cloud/' : ($provider === 'genrouter' ? 'https://genrouter.ru/' : 'https://openrouter.ai/settings/keys')) . '">' . ui('Get an API key in the provider account', 'Получить API-ключ в кабинете провайдера') . '</a></p>';
+        checkbox($provider . '_enabled', ui('Use this provider', 'Использовать провайдера'), $p['enabled']);
+        field($provider . '_key', ui('API key', 'API-ключ'), '', ($p['key'] !== '' ? ui('Key saved. Leave blank to keep it.', 'Ключ сохранён. Оставьте поле пустым, чтобы его не менять.') : ui('Paste the provider API key.', 'Вставьте API-ключ провайдера.')), 'password');
+        checkbox($provider . '_clear_key', ui('Remove saved key', 'Удалить сохранённый ключ'), false);
+        if ($provider === 'yandex') {
+            field('yandex_folder', ui('Yandex Cloud folder ID', 'ID каталога Yandex Cloud'), $p['folder'], ui('Copy folder ID from the cloud console. It is not your cloud ID.', 'Скопируйте ID каталога из консоли облака. Это не ID облака.'));
+            echo '<label for="f_yandex_route">' . ui('Yandex API route', 'API Yandex') . '</label><select id="f_yandex_route" name="yandex_route"><option value="native">Foundation Models (YandexGPT)</option><option value="openai"' . ($p['route'] === 'openai' ? ' selected' : '') . '>OpenAI-compatible (Qwen / Llama / other)</option></select>';
+        }
+        field($provider . '_model', ui('Model identifier', 'Идентификатор модели'), $p['model'], ui('Use the exact identifier from the model catalog. Save before testing or loading the catalog.', 'Укажите точный идентификатор из каталога моделей. Сохраните настройки перед проверкой или загрузкой каталога.'));
+        field($provider . '_proxy', ui('Proxy for this provider (optional)', 'Прокси для этого провайдера (необязательно)'), '', ($p['proxy'] !== '' ? ui('Proxy saved. Leave blank to keep it.', 'Прокси сохранён. Оставьте пустым, чтобы не менять.') : ui('For example http://user:password@host:port. Leave empty for a direct connection.', 'Например http://user:password@host:port. Пустое поле — прямое соединение.')), 'password');
+        checkbox($provider . '_clear_proxy', ui('Remove saved proxy', 'Удалить сохранённый прокси'), false);
+        echo '</details>';
     }
-  }
-
-  async function run(){
-    for (const [kind, text] of intro){
-      const line = document.createElement('span');
-      line.className = 'line' +
-        (kind === 'c' ? ' is-cmt' :
-         kind === 'e' ? ' is-err' :
-         kind === 'p' ? ' is-cmd' :
-         kind === 'i' ? ' is-info' : '');
-      host.appendChild(line);
-      await typeLine(line, text);
-      host.appendChild(document.createTextNode('\n'));
-    }
-    form.classList.remove('hidden');
-    const first = form.querySelector('input,textarea');
-    if (first) first.focus();
-  }
-
-  // Keep the "create a token" link in step with what this deploy will actually need:
-  // the owner comes from the repo field, Pull requests: Read appears once a PR is tracked.
-  const patBtn   = document.getElementById('patbtn');
-  const patPerms = document.getElementById('patperms');
-  const val = id => ((document.getElementById(id) || {}).value || '').trim();
-
-  function syncPat(){
-    if (!patBtn) return;
-    const repo  = val('f_repo');
-    const pr    = val('f_pr_number');
-    const owner = repo.split('/')[0].trim();
-    const p = new URLSearchParams();
-    p.set('name', ('pull.php deploy ' + repo).trim().slice(0, 40));
-    p.set('description', 'Read-only token for pull.php. Under "Repository access" pick ' +
-      (repo || 'the repository to deploy') + '.');
-    p.set('expires_in', 'none');
-    p.set('contents', 'read');
-    p.set('metadata', 'read');
-    if (pr)    p.set('pull_requests', 'read');
-    if (owner) p.set('target_name', owner);
-    patBtn.href = 'https://github.com/settings/personal-access-tokens/new?' + p.toString();
-
-    if (patPerms){
-      patPerms.textContent = 'Preselects Contents: Read + Metadata: Read' +
-        (pr ? ', plus Pull requests: Read (to follow PR #' + pr + ')' : '') +
-        (owner ? '. Resource owner: ' + owner + '.'
-               : '. Fill in the repository above and the owner gets preselected too.');
-    }
-  }
-  ['f_repo', 'f_pr_number'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('input', syncPat);
-  });
-  syncPat();
-
-  run();
-})();
-</script>
-JS;
-    }
-
-    // Run-output page: type out streaming lines as they arrive from the server.
+    echo '<button>' . ui('Save AI connections', 'Сохранить подключения') . '</button></form><p class="help">' . ui('Testing sends a small paid request. Catalog loading does not generate text. Save changes first.', 'Проверка отправляет небольшой платный запрос. Загрузка каталога не генерирует текст. Сначала сохраните изменения.') . '</p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="ai_test"><label>' . ui('Provider', 'Провайдер') . '<select name="provider"><option>yandex</option><option>genrouter</option><option>openrouter</option></select></label><button class="secondary" name="operation" value="test">' . ui('Test connection', 'Проверить подключение') . '</button><button class="secondary" name="operation" value="models">' . ui('Load model catalog', 'Загрузить каталог моделей') . '</button></form></section>';
+}
+function save_php_config(string $path, array $config): bool {
+    $temp = tempnam(dirname($path), '.pull-config-');
+    if ($temp === false) return false;
+    chmod($temp, 0600);
+    $ok = file_put_contents($temp, "<?php\nreturn " . var_export($config, true) . ";\n", LOCK_EX) !== false && rename($temp, $path);
+    if (is_file($temp)) unlink($temp);
+    if ($ok && function_exists('opcache_invalidate')) opcache_invalidate($path, true);
+    return $ok;
+}
+function handle_panel_post(array $config, string $token): void {
+    $action = (string)($_POST['action'] ?? '');
+    if ($action === 'feedback') { send_feedback($config, $token); exit; }
+    $ok = true; $message = ui('Settings saved.', 'Настройки сохранены.');
+    if ($action === 'auto') {
+        $interval = filter_var($_POST['auto_interval'] ?? '', FILTER_VALIDATE_INT);
+        if ($interval === false || $interval < AUTO_INTERVAL_MIN || $interval > 86400) { $ok = false; $message = ui('Interval must be between 15 and 86400 seconds.', 'Интервал должен быть от 15 до 86400 секунд.'); }
+        else { $config['auto_pull'] = isset($_POST['auto_pull']); $config['auto_interval'] = $interval; $raw = require __DIR__ . '/pull-config.php'; $ok = save_php_config(__DIR__ . '/pull-config.php', array_replace($raw, ['auto_pull' => $config['auto_pull'], 'auto_interval' => $interval])); }
+    } elseif ($action === 'ai' || $action === 'ai_test') {
+        try {
+            $cfg = ai_config();
+            if ($action === 'ai') {
+                $order = array_values(array_filter(array_map('trim', explode(',', (string)($_POST['order'] ?? '')))));
+                if (!$order || array_diff($order, LLM::PROVIDERS)) throw new RuntimeException('order');
+                $cfg['order'] = array_values(array_unique($order));
+                foreach (LLM::PROVIDERS as $provider) {
+                    $p = &$cfg[$provider]; $p['enabled'] = isset($_POST[$provider . '_enabled']); $p['model'] = trim((string)($_POST[$provider . '_model'] ?? ''));
+                    foreach (['key', 'proxy'] as $secret) {
+                        $value = trim((string)($_POST[$provider . '_' . $secret] ?? ''));
+                        if (isset($_POST[$provider . '_clear_' . $secret])) $p[$secret] = '';
+                        elseif ($value !== '') $p[$secret] = $value;
+                        if (preg_match('/[\r\n]/', $p[$secret])) throw new RuntimeException('invalid secret');
+                    }
+                    if ($p['proxy'] !== '' && !preg_match('~^(https?|socks5h?)://[^\s]+$~', $p['proxy'])) throw new RuntimeException('proxy');
+                    if ($provider === 'yandex') { $p['folder'] = trim((string)($_POST['yandex_folder'] ?? '')); $p['route'] = ($_POST['yandex_route'] ?? '') === 'openai' ? 'openai' : 'native'; }
+                    unset($p);
+                }
+                $ok = save_php_config(__DIR__ . '/ai-config.php', $cfg);
+            } else {
+                $provider = (string)($_POST['provider'] ?? '');
+                if (!in_array($provider, LLM::PROVIDERS, true)) throw new RuntimeException('provider');
+                $llm = new LLM($cfg);
+                if (($_POST['operation'] ?? '') === 'models') {
+                    $models = $llm->models($provider);
+                    page_start(ui('Available models', 'Доступные модели')); echo '<section><p>' . ui('Copy an identifier into the provider model field.', 'Скопируйте идентификатор в поле модели провайдера.') . '</p><pre>' . h(implode("\n", $models)) . '</pre><a href="?">' . ui('Back to panel', 'Вернуться в панель') . '</a></section>'; page_end(); exit;
+                }
+                $llm->test($provider); $message = ui('Connection successful.', 'Подключение работает.');
+            }
+        } catch (Throwable $e) {
+            $ok = false; $message = ui('Check the provider settings, key, model, folder, provider order and network access. ', 'Проверьте настройки, ключ, модель, каталог, порядок провайдеров и доступ к сети. ');
+            if ($action === 'ai_test') $message .= ui('The provider did not return a valid response.', 'Провайдер не вернул корректный ответ.');
+        }
+    } else { $ok = false; $message = ui('Unknown action.', 'Неизвестное действие.'); }
+    if (!$ok && $message === ui('Settings saved.', 'Настройки сохранены.')) $message = ui('Could not save settings. Check server directory permissions.', 'Не удалось сохранить настройки. Проверьте права записи в папку на сервере.');
+    if (!$ok) http_response_code(422);
+    render_dashboard($config, $message, !$ok); exit;
+}
+function panel_js(): string {
     return <<<'JS'
 <script>
-(function(){
-  const out = document.getElementById('out');
-  if (!out) return;
-  const queue = [];
-  let busy = false, speed = 4;
-
-  function classify(t){
-    const s = t.trim();
-    if (!s) return '';
-    if (s.startsWith('error:') || s.startsWith('!')) return ' is-err';
-    if (s.startsWith('warning:')) return ' is-err';
-    if (s.startsWith('purge:') || s.startsWith('deleted')) return ' is-warn';
-    if (s.startsWith('#'))   return ' is-cmt';
-    if (s.startsWith('==='))  return ' is-cmd';
-    if (/^(START|END|STATUS|DURATION|FILES):/.test(s)) return ' is-info';
-    if (/^DELETED:/.test(s)) return ' is-warn';
-    if (s.startsWith('downloading') || s.startsWith('downloaded') ||
-        s.startsWith('extracted')   || s.startsWith('copied')     ||
-        s.startsWith('copying'))    return ' is-info';
-    return '';
-  }
-
-  async function drain(){
-    busy = true;
-    while (queue.length){
-      const {text, cls} = queue.shift();
-      const node = document.createElement('span');
-      node.className = 'line' + cls;
-      out.appendChild(node);
-      for (let i = 0; i < text.length; i++){
-        node.append(text[i]);
-        if (speed) await new Promise(r => setTimeout(r, speed));
-      }
-      out.appendChild(document.createTextNode('\n'));
-      window.scrollTo(0, document.body.scrollHeight);
-      if (queue.length > 30) speed = 0;
-      else if (queue.length > 8) speed = 1;
-      else speed = 4;
-    }
-    busy = false;
-    if (window.__pullDone){
-      const caret = document.createElement('span');
-      caret.className = 'caret';
-      out.appendChild(caret);
-    }
-  }
-
-  function enqueue(node){
-    queue.push({text: node.dataset.t || '', cls: classify(node.dataset.t || '')});
-    node.remove();
-    if (!busy) drain();
-  }
-
-  // Process anything already in the DOM, then watch for more.
-  document.querySelectorAll('.line').forEach(enqueue);
-  const obs = new MutationObserver(muts => {
-    for (const m of muts) for (const n of m.addedNodes){
-      if (n.nodeType === 1 && n.tagName === 'I' && n.classList.contains('line')){
-        enqueue(n);
-      }
-    }
-  });
-  obs.observe(document.body, {childList:true, subtree:true});
-
-  // Periodically poll in case MutationObserver misses chunks.
-  setInterval(() => {
-    document.querySelectorAll('i.line').forEach(enqueue);
-    if (window.__pullDone && !busy && queue.length === 0){
-      // already finished
-    }
-  }, 250);
+(()=>{
+ const c=window.panelConfig, t=(en,ru)=>c.ru?ru:en, status=document.querySelector('#status'),version=document.querySelector('#version');
+ let busy=false, stopped=false;
+ async function check(){
+  if(busy||stopped)return;busy=true;
+  try{
+   const r=await fetch('?status=1',{cache:'no-store'});
+   if(r.status===401){stopped=true;throw Error(t('Session expired. Reload and sign in.','Сессия истекла. Обновите страницу и войдите.'));}
+   if(!r.ok)throw Error(t('Cannot check for updates. Try again later.','Не удалось проверить обновления. Попробуйте позже.'));
+   const s=await r.json();
+   if(!s.ok)throw Error(t('GitHub is unavailable. Check the repository, key and permissions.','GitHub недоступен. Проверьте репозиторий, ключ и права доступа.'));
+   version.textContent=s.deployed_short?t('Installed version: ','Установленная версия: ')+s.deployed_short+' · '+s.deployed_at:t('No version installed yet.','Пока ни одна версия не установлена.');
+   status.textContent=s.pinned?t('Updates paused after restoring a version.','Обновления приостановлены после возврата версии.'):s.changed?t('A new version is ready.','Доступна новая версия.'):t('Your service is up to date.','У вас актуальная версия.');
+   if(s.auto&&s.changed&&!s.pinned){
+    status.textContent=t('Installing the new version…','Устанавливаем новую версию…');
+    const data=new URLSearchParams({action:'deploy',csrf:c.csrf,automatic:'1'});
+    const deploy=await fetch('?plain=1',{method:'POST',body:data});const output=await deploy.text();
+    if(!deploy.ok||!/STATUS:\s*DONE/.test(output))throw Error(t('Update failed. Use Install latest version to view details.','Обновление не удалось. Нажмите «Установить актуальную версию», чтобы увидеть подробности.'));
+    status.textContent=t('Update installed.','Обновление установлено.');
+   }
+  }catch(e){status.textContent=e.message;}finally{busy=false;if(!stopped)setTimeout(check,c.interval*1000);}
+ }
+ check();
+ const key='neurosaas:embed-tip:'+location.pathname,tip=document.querySelector('#embed-tip');
+ try{if(localStorage.getItem(key)==='hidden')tip.hidden=true;}catch{}
+ document.querySelector('#hide-tip').addEventListener('change',e=>{if(e.target.checked){try{localStorage.setItem(key,'hidden');}catch{}tip.hidden=true;}});
+ document.querySelector('#copy-prompt').addEventListener('click',async e=>{
+  const text=e.currentTarget.textContent;let ok=false;
+  try{await navigator.clipboard.writeText(text);ok=true;}catch{const el=document.createElement('textarea');el.value=text;document.body.append(el);el.select();ok=document.execCommand('copy');el.remove();}
+  document.querySelector('#copy-status').textContent=ok?t('Copied.','Скопировано.'):t('Select the text and copy it manually.','Выделите текст и скопируйте вручную.');
+ });
 })();
 </script>
 JS;
