@@ -24,7 +24,7 @@ declare(strict_types=1);
 
 const CONFIG_FILE = 'pull-config.php';
 const STATE_FILE  = 'pull-state.json';
-const ALWAYS_KEEP = ['pull.php', 'pull-config.php', 'pull-state.json', 'pull-deploy.lock', 'ai-config.php'];
+const ALWAYS_KEEP = ['pull.php', 'pull-config.php', 'pull-state.json', 'pull-deploy.lock', 'ai-config.php', 'modules/site_yacloud_openrouter/data', 'modules/site_yacloud_openrouter/selfheal/token.local.php', 'modules/site_yacloud_openrouter/.env', 'modules/site_yacloud_openrouter/.htaccess'];
 
 // Prefilled fine-grained token form: everything but the repository picker can be
 // set from the URL. See docs.github.com -> "Pre-filling personal access token details".
@@ -90,6 +90,17 @@ $mode = isset($_GET['status']) ? 'json' : ($plain ? 'plain' : 'html');
 // Optional password gate. An empty password_hash means open access.
 if ($config['password_hash'] !== '') {
     require_auth($config['password_hash'], $mode);
+}
+
+if (isset($_GET['toolkit'])) {
+    if ($config['password_hash'] === '') {
+        http_response_code(403);
+        exit('Set a panel password before opening advanced settings.');
+    }
+    require_once __DIR__ . '/lib/toolkit.php';
+    try { \NeuroSaaS\Toolkit::settings((string)$_SESSION['pull_csrf']); }
+    catch (Throwable $e) { http_response_code(503); echo 'Advanced settings require PHP curl, pdo_sqlite, zip, dom and mbstring with a writable module data directory.'; }
+    exit;
 }
 
 $ghToken = (string)(getenv('GITHUB_TOKEN') ?: $config['gh_token']);
@@ -773,18 +784,27 @@ function download(string $url, string $dest, array $extraHeaders = []): array {
     return [$size, $size > 0 ? '' : 'empty file'];
 }
 
+function keepChildren(array $paths, string $directory): array {
+    $prefix = $directory . '/';
+    $children = [];
+    foreach ($paths as $path) {
+        if (strpos($path, $prefix) === 0) $children[] = substr($path, strlen($prefix));
+    }
+    return $children;
+}
+
 function copyTree(string $from, string $to, array $keepTopLevel, int &$copied): void {
     if (!is_dir($to) && !mkdir($to, 0755, true) && !is_dir($to)) return;
     foreach (new DirectoryIterator($from) as $f) {
         if ($f->isDot()) continue;
         $name = $f->getFilename();
-        if ($keepTopLevel && in_array($name, $keepTopLevel, true)) continue;
-        $s = $f->getPathname();
-        $d = $to . '/' . $name;
+        if (in_array($name, $keepTopLevel, true)) continue;
+        $source = $f->getPathname();
+        $destination = $to . '/' . $name;
         if ($f->isDir()) {
-            copyTree($s, $d, [], $copied);
+            copyTree($source, $destination, keepChildren($keepTopLevel, $name), $copied);
         } else {
-            @copy($s, $d);
+            @copy($source, $destination);
             $copied++;
         }
     }
@@ -794,26 +814,24 @@ function copyTree(string $from, string $to, array $keepTopLevel, int &$copied): 
 // Top-level names in $keepTopLevel are skipped entirely. Symlinks are never
 // followed — the link itself is removed, whatever it points at stays untouched.
 function purgeExtra(string $src, string $dst, array $keepTopLevel, int &$files, int &$dirs): void {
-    // A missing source would make every target file look obsolete — refuse to delete.
     if (!is_dir($src) || !is_dir($dst)) return;
     foreach (new DirectoryIterator($dst) as $f) {
         if ($f->isDot()) continue;
         $name = $f->getFilename();
-        if ($keepTopLevel && in_array($name, $keepTopLevel, true)) continue;
-        $d = $f->getPathname();
-        $s = $src . '/' . $name;
+        if (in_array($name, $keepTopLevel, true)) continue;
+        $destination = $f->getPathname();
+        $source = $src . '/' . $name;
+        $nested = keepChildren($keepTopLevel, $name);
         if ($f->isLink()) {
-            if (!file_exists($s)) { @unlink($d); $files++; }
-            continue;
-        }
-        if ($f->isDir()) {
-            if (is_dir($s)) {
-                purgeExtra($s, $d, [], $files, $dirs);
-            } else {
-                rmTree($d, $files, $dirs);
+            if (!file_exists($source)) { @unlink($destination); $files++; }
+        } elseif ($f->isDir()) {
+            if (is_dir($source)) {
+                purgeExtra($source, $destination, $nested, $files, $dirs);
+            } elseif ($nested === []) {
+                rmTree($destination, $files, $dirs);
             }
-        } elseif (!is_file($s)) {
-            @unlink($d);
+        } elseif (!is_file($source)) {
+            @unlink($destination);
             $files++;
         }
     }
@@ -1170,6 +1188,7 @@ function render_dashboard(array $config, string $message = '', bool $error = fal
     checkbox('auto_pull', ui('Install new versions while this panel is open', 'Устанавливать новые версии, пока панель открыта'), $config['auto_pull']);
     field('auto_interval', ui('Interval in seconds', 'Интервал в секундах'), (string)$config['auto_interval'], ui('At least 15. Closing this page stops browser checks.', 'Не менее 15. После закрытия страницы проверки из браузера прекращаются.'), 'number');
     echo '<button class="secondary">' . ui('Save settings', 'Сохранить настройки') . '</button></form><p class="help">' . ui('For updates with the browser closed, ask your hosting provider to schedule the following cron command once a minute. If a password is set, pass it through the X-Pull-Password header.', 'Для обновлений при закрытом браузере попросите хостинг запускать эту команду cron раз в минуту. Если задан пароль, передайте его в заголовке X-Pull-Password.') . '</p><code>curl --fail -s -H "X-Pull-Password: YOUR_PANEL_PASSWORD" "https://YOUR_HOST/PATH/pull.php?check=1&amp;plain=1"</code></details></section>';
+    echo '<section><h2>' . ui('Models, documents and mail', 'Модели, документы и почта') . '</h2><p><a class="button" href="?toolkit=1">' . ui('Open advanced settings', 'Открыть расширенные настройки') . '</a></p></section>';
     feedback_form();
     render_ai_settings();
     echo '<section id="embed-tip"><h2>' . ui('Make feedback easy to find', 'Сделайте обратную связь доступной') . '</h2><p>' . ui('Add this to your next development prompt. Click the text to copy it.', 'Добавьте это в следующий промпт для разработки. Нажмите на текст, чтобы скопировать.') . '</p><button type="button" class="secondary" id="copy-prompt">Embed pull.php feedback form directly into the interface of the service, so that users can immediately submit their complaints directly to the repository.</button><p id="copy-status" role="status"></p><label class="check"><input type="checkbox" id="hide-tip"><span>' . ui('Do not show again', 'Больше не показывать') . '</span></label></section>';
@@ -1178,13 +1197,13 @@ function render_dashboard(array $config, string $message = '', bool $error = fal
     page_end();
 }
 function feedback_form(): void {
-    echo '<section id="feedback"><h2>' . ui('Tell us what could be better', 'Расскажите, что можно улучшить') . '</h2><p>' . ui('Your message becomes an issue in the connected GitHub repository. Do not include passwords or private customer information.', 'Сообщение станет задачей в подключённом репозитории GitHub. Не указывайте пароли и личные данные клиентов.') . '</p><form method="post" action="?feedback=1">' . csrf_field() . '<input type="hidden" name="action" value="feedback">';
+    echo '<section id="feedback"><h2>' . ui('Request a change', 'Заказать доработку') . '</h2><p>' . ui('Your message becomes an issue in the connected GitHub repository. Do not include passwords or private customer information.', 'Сообщение станет задачей в подключённом репозитории GitHub. Не указывайте пароли и личные данные клиентов.') . '</p><form method="post" action="?feedback=1">' . csrf_field() . '<input type="hidden" name="action" value="feedback">';
     field('title', ui('Short title', 'Краткое название'), (string)($_POST['title'] ?? ''), ui('From 3 to 200 characters. What went wrong or what would you like to add?', 'От 3 до 200 символов. Что не работает или что вы хотите добавить?'));
     field('description', ui('Details', 'Подробности'), (string)($_POST['description'] ?? ''), ui('10–10,000 characters. Describe what you did, what happened, and the result you expected.', '10–10 000 символов. Опишите свои действия, что произошло и какой результат вы ожидали.'), 'textarea');
-    echo '<button>' . ui('Send feedback', 'Отправить отзыв') . '</button></form></section>';
+    echo '<button>' . ui('Request a change', 'Заказать доработку') . '</button></form></section>';
 }
 function render_feedback(string $message = '', bool $error = false, string $url = ''): void {
-    page_start(ui('Feedback', 'Обратная связь'));
+    page_start(ui('Request a change', 'Заказать доработку'));
     if ($message !== '') echo '<p role="status" class="notice ' . ($error ? 'error' : 'success') . '">' . h($message) . ($url !== '' ? ' <a target="_blank" rel="noopener" href="' . h($url) . '">' . ui('Open issue', 'Открыть задачу') . '</a>' : '') . '</p>';
     feedback_form(); page_end();
 }

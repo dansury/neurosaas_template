@@ -2,3 +2,9 @@
 /pull-state.json
 /pull-deploy.lock
 /ai-config.php
+/modules/site_yacloud_openrouter/data/
+/modules/site_yacloud_openrouter/selfheal/token.local.php
+/modules/site_yacloud_openrouter/.env
+.serena/
+__pycache__/
+*.pyc
