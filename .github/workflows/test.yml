@@ -1,0 +1,21 @@
+name: Template checks
+on: [push, pull_request]
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.1', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: curl, pdo_sqlite, zip, dom, mbstring, openssl
+      - run: find . -name '*.php' -not -path './.git/*' -exec php -l {} \;
+      - run: php tests/run.php
+      - run: php tests/toolkit.php
+      - run: for file in modules/site_yacloud_openrouter/tests/*.php; do php "$file" || exit 1; done
+      - run: python3 tests/http_test.py
+      - run: python3 tests/toolkit_http.py
+

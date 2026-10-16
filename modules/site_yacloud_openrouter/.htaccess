@@ -1,0 +1,3 @@
+# Module entry points are mounted through the authenticated NeuroSaaS panel.
+Require all denied
+

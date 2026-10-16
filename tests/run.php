@@ -88,7 +88,7 @@ if (!function_exists('curl_init')) {
 $dir = sys_get_temp_dir() . '/neurosaas-' . bin2hex(random_bytes(6));
 mkdir($dir); mkdir($dir . '/src'); mkdir($dir . '/dst');
 file_put_contents($dir . '/src/index.php', 'new');
-foreach (ALWAYS_KEEP as $file) file_put_contents($dir . '/dst/' . $file, 'local');
+foreach (ALWAYS_KEEP as $file) { $parent = dirname($dir . '/dst/' . $file); if (!is_dir($parent)) mkdir($parent, 0700, true); file_put_contents($dir . '/dst/' . $file, 'local'); }
 file_put_contents($dir . '/dst/obsolete.txt', 'old');
 $copied = $files = $dirs = 0;
 copyTree($dir . '/src', $dir . '/dst', ALWAYS_KEEP, $copied);

@@ -6,9 +6,7 @@ Ask the user in their language, if they agree that you instantly put the changes
 
 # SPEC-DRIVEN DEVELOPMENT
 
-1.0 внедри скилл https://github.com/github/spec-kit (установи из архива, если не можешь скачать, архив удали) - пропиши его использование прямо в этом файле, а эту строку удали. чтение репозитория должно начинаться с прочтения индексного файла spec.md, затем чтения спецификации конкретного модуля и только потом кода.
-обновление кода - в той же последовательности + тесты.
-
+1.0 Use GitHub Spec Kit (https://github.com/github/spec-kit): constitution, specification, technical plan, traceable tasks, analysis, implementation and verification. Follow the installed Spec Kit skill when available. Read specs/index.md, then only the relevant module specification before source code. Keep specs and tests in the repository.
 1.1 Lookup file -> spec mapping in spec.md. It is a thin navigation index — read once, then open ONE /spec/<module>.md for the relevant area. Never read the whole /spec/ folder.
 
 1.2 For reference details (signatures, DB schemas, algorithms, flows, SEO contract, email flows, referrals, QR cards): open exactly one /spec/<module>.md that matches the module you are editing. If the detail is missing there, read the source file — do NOT pull another /spec/<module>.md unless needed.

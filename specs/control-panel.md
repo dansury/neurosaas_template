@@ -17,5 +17,8 @@ Save enable/disable and interval in config. While the panel is open, poll status
 ## AI connections
 Reusable dependency-free lib/llm.php adapted from kp-atlant's provider design, without its database, logging, mail or quote dependencies. Support Yandex Foundation Models (native and OpenAI-compatible routes), GenRouter and OpenRouter, ordered fallback, bounded transient retries, text and strict JSON responses, model catalogs, connection tests and per-provider proxy selection. UI saves secrets server-side, never echoes them; blank secret fields preserve saved keys. OpenRouter is collapsed and disabled initially, with the requested Russian-hosting warning. No live test or billing call without pressing its test button. Local configs are ignored by git and preserved by deployment.
 
+## Advanced infrastructure and development requests
+The optional canonical module is mounted at `?toolkit=1` after the normal password, IP and CSRF gates. A password is mandatory for this route even if the deployment panel was configured without one. It adds the complete infrastructure defined in `005-toolkit-parity/spec.md`; the original instance LLM remains backward compatible. Feedback actions are labelled `Заказать доработку` / `Request a change` and retain the configured repository, validation and server-side token behavior.
+
 ## Acceptance
 PHP lint; isolated HTTP tests of setup, authentication, CSRF, locale, feedback validation and mocked GitHub requests; mocked AI route/payload/fallback/JSON tests; syntax check UI JavaScript. No real issues or paid AI calls during automated tests.
