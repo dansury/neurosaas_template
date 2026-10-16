@@ -1,66 +1,74 @@
-# NeuroSaaS template
+# NeuroSaaS — шаблон репозитория для AI-сервиса
 
-A small PHP foundation for AI services: GitHub deployment, feedback and reusable AI connections. Inspired by `dansury/kp-atlant`, without its business-specific dependencies.
+Это **template repository**: он нужен как стартовая точка для нового AI-проекта. На его основе GitHub создаёт отдельный репозиторий — исходный шаблон не изменяется.
 
-## Install
+В шаблоне уже есть `pull.php`: один файл для загрузки на хостинг. Он сам забирает код из GitHub, умеет ставить выбранную версию, проверять обновления и возвращаться к ранее установленной версии. В репозитории также есть модуль подключения AI-провайдеров (`lib/llm.php`) и тесты.
 
-Requires PHP 8.1+, sessions, ZipArchive and outbound HTTPS. cURL is required for AI; deployment and feedback also support PHP HTTPS streams.
+## Быстрый запуск: три шага
 
-1. Upload `pull.php` to your service directory. Open it in a browser.
-2. Enter `owner/repository`, branch and a GitHub fine-grained token. The creation button requests **Contents: Read**, **Issues: Read and write**, and **Pull requests: Read** when a preview is selected. Select your repository on GitHub. Issues must be enabled in repository settings.
-3. Set a panel password. The panel can install code, send feedback and make paid AI test calls; without a password these actions are accessible to anyone with its URL.
-4. Save, open the panel, and press **Install latest version**. For this template choose the repository root (`.`). This installs `lib/llm.php` and the rest of the project.
-5. Set up AI connections in the panel. Keys are stored in `ai-config.php`, never returned to the browser. Empty secret fields keep existing keys; separate checkboxes remove them. Files are created with mode 0600 and excluded from git.
+### 1. Создайте свой репозиторий из шаблона
 
-For a different project, include `lib/llm.php` in its deployment directory to use the AI controls. When deploying only a repository subdirectory, put the library there too. `pull.php` remains a single-file installer and is always preserved; replace it manually to upgrade the installer itself.
+1. Откройте [страницу создания репозитория из шаблона](https://github.com/dansury/neurosaas_template/generate).
+2. В поле **Owner** выберите свой аккаунт или организацию, укажите имя нового проекта и его видимость.
+3. Нажмите **Create repository from template**.
+4. Работайте уже в созданном репозитории. Он независим от `dansury/neurosaas_template`: добавляйте в него код, документацию и настройки своего сервиса.
 
-## Updates and rollback
+Если кнопка создания по ссылке недоступна, на странице шаблона нажмите **Use this template** → **Create a new repository**.
 
-Opening `pull.php` shows the panel without changing project files. Browser actions use CSRF-protected POST requests. The panel polls GitHub while it is open. Automatic update settings persist; restoring a historical version pauses automation until an explicit latest-version install. A filesystem lock prevents concurrent deployments. Preserve uploads, data folders, `.env` and any local service configuration in setup before enabling deletion.
+## 2. Дайте репозиторий AI-агенту и техническое задание
 
-For unattended operation schedule this command in hosting cron, for example once a minute (replace host and path):
+Для работы AI-агенту разработки достаточно дать ссылку на ваш новый репозиторий и понятное техническое задание. Не нужно вручную копировать ему файлы или устанавливать отдельное подключение только для чтения проекта.
 
-```sh
-curl --fail -s -H "X-Pull-Password: $PULL_PASSWORD" "https://YOUR_HOST/PATH/pull.php?check=1&plain=1"
+Пример задания для агента:
+
+```text
+Работай с репозиторием: https://github.com/OWNER/PROJECT
+
+Сначала прочитай CLAUDE.MD, затем specs/index.md и спецификацию
+нужного модуля. Не меняй секреты, файлы хостинга и историю без явной
+необходимости.
+
+Техническое задание:
+[опишите цель, пользовательский сценарий, ограничения, критерии готовности
+и что нужно проверить тестами]
+
+После реализации обнови соответствующую спецификацию и тесты, сделай
+отдельную ветку и pull request.
 ```
 
-Keep `PULL_PASSWORD` in the cron environment. The explicit cron endpoint checks for changed commits independently of the browser toggle. `?status=1` returns JSON; `?plain=1` remains the explicit plain-text deploy endpoint for existing integrations. `?history=1` opens rollback history. Protect cron endpoints with the panel password. Do not put passwords into URLs.
+Хорошее ТЗ отвечает на четыре вопроса: кому нужна функция, какой результат пользователь должен получить, какие ограничения нельзя нарушать и как проверить готовность. AI-агент формирует гипотезы; важные продуктовые и финансовые решения проверяйте отдельно.
 
-`pull.php`, `pull-config.php`, `pull-state.json`, `pull-deploy.lock` and `ai-config.php` are always preserved. Settings can also be edited on the server; deleting `pull-config.php` reopens setup. Set `GITHUB_TOKEN` on the server to override the saved GitHub key. `KRASKI_PULL_ALLOW_IPS` is a compatible optional comma-separated IP allowlist.
+> AI-агент разработки и AI внутри вашего сервиса — разные вещи. Провайдеры для самого сервиса настраиваются в панели `pull.php` после первой установки кода на хостинг.
 
-## Feedback in your service
+## 3. Разместите на хостинге только `pull.php`
 
-The panel includes a feedback form. `pull.php?feedback=1` is its standalone page, suitable for an iframe in an authenticated same-origin service:
+1. Создайте папку будущего сервиса на PHP-хостинге и загрузите в неё **только** файл `pull.php` из вашего репозитория.
+2. Откройте в браузере `https://ВАШ-ДОМЕН/ПУТЬ/pull.php`.
+3. При первом запуске укажите `owner/репозиторий`, ветку (обычно `main`) и GitHub fine-grained token с правом **Contents: Read**. Если нужен встроенный приём обратной связи, добавьте **Issues: Read and write**; для предпросмотра pull request — **Pull requests: Read**.
+4. Задайте пароль панели и нажмите «Установить актуальную версию». Если проект хранится в корне репозитория, выберите каталог `.`.
 
-```html
-<iframe src="pull.php?feedback=1" title="Обратная связь" style="width:100%;height:760px;border:0"></iframe>
-```
+`pull.php` скачает код выбранного коммита из GitHub. На сервере появятся остальные файлы проекта и локальные служебные файлы, но вручную по FTP/SFTP загружать их не нужно.
 
-It uses the panel's password protection. Service users need authorization to that panel; for a public service, implement a separate authenticated, rate-limited endpoint using the service's own users, rather than exposing the deployment password or disabling it. The GitHub token always stays on the server. No page URL, prompts, credentials or customer records are attached automatically. Feedback is limited to one attempt per browser session per minute, with title/body length limits. A permission failure includes instructions to grant Issues write. This is a basic administrator feedback feature, not a public anonymous reporting endpoint.
+После каждого обновления в репозитории откройте тот же адрес `pull.php` и нажмите «Установить актуальную версию». Простое открытие страницы безопасно: оно показывает панель, но не меняет файлы. Также доступны проверка обновлений по cron и автоматическая проверка в открытой панели — это дополнения, а не замена осознанному обновлению.
 
-The panel also offers the requested copyable embedding prompt and a browser-persisted “do not show again” choice.
+## Требования и безопасность
 
-## Language from visitor IP
+- Нужны PHP 8.1+, сессии, `ZipArchive` и исходящий HTTPS. Для AI-подключений нужен cURL.
+- Не добавляйте GitHub token, пароль панели, `pull-config.php` или `ai-config.php` в Git. Эти файлы создаются на хостинге и уже исключены через `.gitignore`.
+- Установите сильный пароль панели: она может разворачивать код, создавать задачи обратной связи и запускать платные тесты AI-провайдеров.
+- Перед включением опции удаления лишних файлов убедитесь, что пользовательские загрузки, данные и локальная конфигурация внесены в список сохранения. Эта операция необратима.
 
-The interface defaults to Russian for RU/BY/KZ and English elsewhere. Configure your hosting's GeoIP module to supply `GEOIP_COUNTRY_CODE`, or install PHP GeoIP with its country database. Behind Cloudflare, `PULL_TRUST_CLOUDFLARE=1` enables `CF-IPCountry` **only when the origin is restricted to trusted Cloudflare traffic**. Arbitrary visitor headers are otherwise ignored. Without a country source the default is English. The remembered Русский / English switch always overrides detection. No visitor IP is sent to a third-party geolocation API.
+`pull.php`, `pull-config.php`, `pull-state.json`, `pull-deploy.lock` и `ai-config.php` сохраняются при обновлении. Архив `spec-kit-main.zip` оставлен в репозитории намеренно и не удаляется.
 
-## Use AI from application code
+## Что есть в шаблоне
 
-```php
-require_once __DIR__ . '/lib/llm.php';
-$config = require __DIR__ . '/ai-config.php';
-$llm = new LLM($config);
-$text = $llm->chatText('You are a helpful assistant.', 'Explain this service.');
-$data = $llm->chatJson('Extract structured fields.', 'Name: Anna');
-```
+- `pull.php` — установщик и панель обновления на хостинге;
+- `lib/llm.php` — подключение Yandex Foundation Models, GenRouter и OpenRouter с упорядоченным резервированием;
+- `specs/` — спецификации актуального поведения;
+- `tests/` — изолированные проверки без реальных платных AI-запросов и без создания задач на GitHub;
+- `spec-kit-main.zip` — сохранённый архив Spec Kit.
 
-Providers: Yandex Foundation Models, GenRouter, OpenRouter. Enable only providers you want, specify a model identifier and choose their fallback order. Disabled/unconfigured providers are skipped; transient 429/5xx errors get one bounded retry. Invalid, empty or truncated responses fall through to the next provider. JSON responses are parsed strictly; incomplete JSON is never silently repaired.
-
-Yandex needs an API key, folder ID and model. Choose native Foundation Models for YandexGPT or the OpenAI-compatible route for supported open models. Short slugs become `gpt://FOLDER/SLUG/latest`; full model URIs are also accepted. Catalogs are fetched on demand; availability depends on your account. If a catalog is unavailable, enter the exact model identifier from your provider console.
-
-OpenRouter is disabled and collapsed initially: **it may not work from Russian hosting**. Each provider has an optional proxy; use a trusted proxy because it handles AI traffic. Test connections from the hosting server with the panel button. A test makes a small paid generation request; normal page views and catalog loading do not generate text.
-
-## Checks
+Перед изменением кода сначала откройте `CLAUDE.MD`, затем `specs/index.md` и спецификацию изменяемого модуля. Проверка после изменений:
 
 ```sh
 php -l pull.php
@@ -69,6 +77,11 @@ php tests/run.php
 python3 tests/http_test.py
 ```
 
-Tests use isolated temporary directories, mocked network transports and fake keys. They do not create real GitHub issues or incur AI charges.
+## Полезные адреса панели
 
-Consultation and improvements: [dansury.github.io](https://dansury.github.io) · [Telegram](https://t.me/dansury.vj).
+- `pull.php` — панель и ручная установка;
+- `pull.php?status=1` — состояние установленной и доступной версий в JSON;
+- `pull.php?history=1` — история версий и откат;
+- `pull.php?check=1&plain=1` — проверка и установка только при появлении нового коммита, подходит для cron.
+
+Не передавайте пароль в URL. Для cron используйте заголовок `X-Pull-Password` и переменную окружения на хостинге.

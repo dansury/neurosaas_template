@@ -1,3 +1,4 @@
-# NeuroSaaS template specifications
+# Спецификации NeuroSaaS template
 
-- [Control panel and AI connections](control-panel.md): issue #1, deployment, feedback, localization and reusable providers.
+- [`pull.php`: установка и обновление на хостинге](pull-php.md): настройка, аутентификация, загрузка версии, история, откат, автоматические проверки и сохранение локальных файлов.
+- [Панель управления и AI-подключения](control-panel.md): обратная связь, локализация и переиспользуемые провайдеры AI.
