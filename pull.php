@@ -93,6 +93,11 @@ if ($config['password_hash'] !== '') {
 }
 
 if (isset($_GET['toolkit'])) {
+    // Never let the standalone module interpret the login POST as a settings save.
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['password'])) {
+        header('Location: ?toolkit=1', true, 303);
+        exit;
+    }
     if ($config['password_hash'] === '') {
         http_response_code(403);
         exit('Set a panel password before opening advanced settings.');
