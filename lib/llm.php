@@ -16,7 +16,7 @@ final class LLM {
     public static function defaults(): array {
         return [
             'order' => ['yandex', 'genrouter', 'openrouter'],
-            'yandex' => ['enabled' => false, 'key' => '', 'folder' => '', 'model' => 'yandexgpt/latest', 'route' => 'native', 'proxy' => ''],
+            'yandex' => ['enabled' => false, 'key' => '', 'folder' => '', 'model' => 'yandexgpt/latest', 'route' => 'native', 'openai_base' => 'https://ai.api.cloud.yandex.net/v1', 'proxy' => ''],
             'genrouter' => ['enabled' => false, 'key' => '', 'model' => '', 'proxy' => ''],
             'openrouter' => ['enabled' => false, 'key' => '', 'model' => '', 'proxy' => ''],
         ];
@@ -125,7 +125,8 @@ final class LLM {
                 if ($json) $payload['jsonObject'] = true;
                 return ['https://llm.api.cloud.yandex.net/foundationModels/v1/completion', $this->headers($provider), $payload];
             }
-            $url = 'https://llm.api.cloud.yandex.net/v1/chat/completions';
+            $base = rtrim((string)($p['openai_base'] ?? 'https://ai.api.cloud.yandex.net/v1'), '/');
+            $url = $base . '/chat/completions';
         } else {
             $url = $this->base($provider) . '/chat/completions';
         }

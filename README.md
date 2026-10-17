@@ -63,10 +63,25 @@
 ## Что есть в шаблоне
 
 - `pull.php` — установщик и панель обновления на хостинге;
-- `lib/llm.php` — подключение Yandex Foundation Models, GenRouter и OpenRouter с упорядоченным резервированием;
+- `lib/llm.php` — подключение Yandex Foundation Models, GenRouter и OpenRouter с упорядоченным резервированием. Для YandexAI Studio OpenAI-совместимых моделей (например, `gpt://<folder_ID>/qwen3-235b-a22b-fp8/latest`) используется отдельный настраиваемый адрес `https://ai.api.cloud.yandex.net/v1`; это не маршрут YandexGPT Foundation Models;
 - `specs/` — спецификации актуального поведения;
 - `tests/` — изолированные проверки без реальных платных AI-запросов и без создания задач на GitHub;
 - `spec-kit-main.zip` — сохранённый архив Spec Kit.
+
+### Yandex AI Studio: OpenAI-compatible models
+
+Для Qwen, Llama и других open-weight моделей в Yandex AI Studio выберите в
+панели маршрут **OpenAI-compatible**. Его стандартный адрес —
+`https://ai.api.cloud.yandex.net/v1`, а идентификатор модели имеет вид
+`gpt://<folder_ID>/qwen3-235b-a22b-fp8/latest`. Этот API не заменяет маршрут
+**Foundation Models (YandexGPT)**: для YandexGPT оставьте соответствующий тип
+маршрута в панели.
+
+Учётной записи или service account требуются роли `yc.ai.languageModels.execute`
+и `ai.languageModels.user`. Ответ `403` при корректных правах может означать не
+только отсутствующую IAM-роль, но и обращение к устаревшему адресу
+`llm.api.cloud.yandex.net/v1`; проверьте, что в настройке указан актуальный
+`ai.api.cloud.yandex.net/v1`.
 
 Перед изменением кода сначала откройте `CLAUDE.MD`, затем `specs/index.md` и спецификацию изменяемого модуля. Проверка после изменений:
 
