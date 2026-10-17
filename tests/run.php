@@ -30,10 +30,12 @@ $adapter = new LLM($cfg);
 [$url, $headers, $body] = $adapter->request('yandex', [['role' => 'user', 'content' => 'hi']], true);
 expect(strpos($url, '/foundationModels/v1/completion') !== false && $body['modelUri'] === 'gpt://FOLDER/sample/latest' && $body['jsonObject'] === true, 'native yandex payload');
 expect($body['messages'][0]['text'] === 'hi', 'native messages');
-$cfg['yandex']['route'] = 'openai'; $cfg['yandex']['model'] = 'gpt://FOLDER/qwen/latest';
+$cfg['yandex']['route'] = 'openai'; $cfg['yandex']['model'] = 'gpt://FOLDER/qwen3-235b-a22b-fp8/latest';
 $adapter = new LLM($cfg);
 [$url, , $body] = $adapter->request('yandex', [], true);
-expect(strpos($url, '/v1/chat/completions') !== false && $body['model'] === $cfg['yandex']['model'] && $body['response_format']['type'] === 'json_object', 'openai yandex route');
+expect($url === 'https://ai.api.cloud.yandex.net/v1/chat/completions' && $body['model'] === $cfg['yandex']['model'] && $body['response_format']['type'] === 'json_object', 'current OpenAI-compatible Yandex endpoint and Qwen URI');
+$cfg['yandex']['openai_base'] = 'https://gateway.example/v1/'; $adapter = new LLM($cfg); [$url] = $adapter->request('yandex', [], false);
+expect($url === 'https://gateway.example/v1/chat/completions', 'custom OpenAI-compatible Yandex endpoint');
 [$url] = $adapter->request('genrouter', [], false); expect($url === 'https://api.genrouter.ru/v1/chat/completions', 'GenRouter endpoint matches upstream');
 
 $calls = [];
