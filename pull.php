@@ -1265,6 +1265,7 @@ function render_ai_settings(): void {
         if ($provider === 'yandex') {
             field('yandex_folder', ui('Yandex Cloud folder ID', 'ID каталога Yandex Cloud'), $p['folder'], ui('Copy folder ID from the cloud console. It is not your cloud ID.', 'Скопируйте ID каталога из консоли облака. Это не ID облака.'));
             echo '<label for="f_yandex_route">' . ui('Yandex API route', 'API Yandex') . '</label><select id="f_yandex_route" name="yandex_route"><option value="native">Foundation Models (YandexGPT)</option><option value="openai"' . ($p['route'] === 'openai' ? ' selected' : '') . '>OpenAI-compatible (Qwen / Llama / other)</option></select>';
+            field('yandex_openai_base', ui('OpenAI-compatible base URL', 'Базовый URL OpenAI-совместимого API'), $p['openai_base'], ui('Default: https://ai.api.cloud.yandex.net/v1. Use this route for Qwen, Llama and other open models; YandexGPT uses the Foundation Models route above.', 'По умолчанию: https://ai.api.cloud.yandex.net/v1. Используйте этот маршрут для Qwen, Llama и других открытых моделей; для YandexGPT выберите маршрут Foundation Models выше.'));
         }
         field($provider . '_model', ui('Model identifier', 'Идентификатор модели'), $p['model'], ui('Use the exact identifier from the model catalog. Save before testing or loading the catalog.', 'Укажите точный идентификатор из каталога моделей. Сохраните настройки перед проверкой или загрузкой каталога.'));
         field($provider . '_proxy', ui('Proxy for this provider (optional)', 'Прокси для этого провайдера (необязательно)'), '', ($p['proxy'] !== '' ? ui('Proxy saved. Leave blank to keep it.', 'Прокси сохранён. Оставьте пустым, чтобы не менять.') : ui('For example http://user:password@host:port. Leave empty for a direct connection.', 'Например http://user:password@host:port. Пустое поле — прямое соединение.')), 'password');
@@ -1306,7 +1307,13 @@ function handle_panel_post(array $config, string $token): void {
                         if (preg_match('/[\r\n]/', $p[$secret])) throw new RuntimeException('invalid secret');
                     }
                     if ($p['proxy'] !== '' && !preg_match('~^(https?|socks5h?)://[^\s]+$~', $p['proxy'])) throw new RuntimeException('proxy');
-                    if ($provider === 'yandex') { $p['folder'] = trim((string)($_POST['yandex_folder'] ?? '')); $p['route'] = ($_POST['yandex_route'] ?? '') === 'openai' ? 'openai' : 'native'; }
+                    if ($provider === 'yandex') {
+                        $p['folder'] = trim((string)($_POST['yandex_folder'] ?? ''));
+                        $p['route'] = ($_POST['yandex_route'] ?? '') === 'openai' ? 'openai' : 'native';
+                        $p['openai_base'] = rtrim(trim((string)($_POST['yandex_openai_base'] ?? '')), '/');
+                        if ($p['openai_base'] === '') $p['openai_base'] = 'https://ai.api.cloud.yandex.net/v1';
+                        if (!preg_match('~^https://[^\\s/]+(?:/[^\\s]*)?$~', $p['openai_base'])) throw new RuntimeException('yandex endpoint');
+                    }
                     unset($p);
                 }
                 $ok = save_php_config(__DIR__ . '/ai-config.php', $cfg);
