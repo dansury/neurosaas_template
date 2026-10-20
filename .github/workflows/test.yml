@@ -16,8 +16,10 @@ jobs:
       - run: php tests/run.php
       - run: php tests/layout.php
       - run: php tests/toolkit.php
+      - run: php tests/diagnostics.php
       - run: for file in admin/llm_connector/tests/*.php; do php "$file" || exit 1; done
       - run: python3 tests/http_test.py
       - run: python3 tests/toolkit_http.py
       - run: python3 tests/account_http.py
+      - run: python3 tests/local_diagnostics_http.py
 
