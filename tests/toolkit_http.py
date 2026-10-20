@@ -24,14 +24,13 @@ def expect(value, label):
 with tempfile.TemporaryDirectory(prefix="neurosaas-toolkit-http-") as folder:
     work = Path(folder)
     shutil.copy(ROOT / "pull.php", work)
-    shutil.copy(ROOT / "example.php", work)
-    shutil.copytree(ROOT / "lib", work / "lib")
-    shutil.copytree(ROOT / "modules", work / "modules", ignore=shutil.ignore_patterns("data"))
+    shutil.copy(ROOT / "index.php", work)
+    shutil.copytree(ROOT / "admin", work / "admin", ignore=shutil.ignore_patterns("data"))
     config = """<?php return [
         'repo'=>'owner/repo','branch'=>'main','subdir'=>'.','source'=>'branch',
         'pr_number'=>0,'purge'=>false,'timezone'=>'UTC','gh_token'=>'',
         'password_hash'=>password_hash('sample-pass', PASSWORD_DEFAULT),
-        'keep_files'=>[],'auto_pull'=>false,'auto_interval'=>60];"""
+        'admin_email'=>'owner@example.test','admin_email_verified'=>true,'keep_files'=>[],'auto_pull'=>false,'auto_interval'=>60];"""
     hashed = subprocess.check_output([PHP, "-r", "echo password_hash('sample-pass', PASSWORD_DEFAULT);"], text=True)
     config = config.replace("password_hash('sample-pass', PASSWORD_DEFAULT)", "'" + hashed + "'")
     (work / "pull-config.php").write_text(config, encoding="utf-8")
@@ -43,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-toolkit-http-") as folder:
         PHP, "-d", "disable_functions=curl_exec,curl_multi_exec,mail,fsockopen,stream_socket_client",
         "-d", "session.save_path=" + folder, "-S", f"127.0.0.1:{port}", "-t", folder
     ], stdout=logs, stderr=logs, env=dict(os.environ, GEOIP_COUNTRY_CODE="RU", SELFHEAL_REPORTING="ask"))
-    url = f"http://127.0.0.1:{port}/pull.php"
+    url = f"http://127.0.0.1:{port}/admin/"
     client = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
     def request(query="", data=None, selected=None):
         data = urllib.parse.urlencode(data).encode() if data is not None else None
@@ -85,7 +84,7 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-toolkit-http-") as folder:
         fresh = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         status, _ = request("?toolkit=1", selected=fresh)
         expect(status == 401, "fresh session cannot access the mounted module")
-        direct = client.open(f"http://127.0.0.1:{port}/modules/site_yacloud_openrouter/setup.php").read().decode()
+        direct = client.open(f"http://127.0.0.1:{port}/admin/llm_connector/setup.php").read().decode()
         expect("ВХОД В НАСТРОЙКИ" in direct, "host auth is never persisted into standalone module session")
         status, html = request("?feedback=1")
         expect(status == 200 and "Идеи для доработки" in html, "development request form wording")

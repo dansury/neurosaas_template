@@ -1,8 +1,10 @@
-# Спецификации NeuroSaaS template
+# NeuroSaaS specifications
 
-- [Русская первичная настройка и идеи для доработки](pull-panel-russian-onboarding.md): GitHub key helper, panel password, feedback flow and GenRouter-first cards.
+Read CLAUDE.MD, then this index, then the relevant module contract before source code.
 
-- [Complete toolkit integration](005-toolkit-parity/spec.md): document/OCR, SMTP, diagnostics, catalogs, self-maintenance and authenticated settings. Technical plan: [plan](005-toolkit-parity/plan.md). Verification: [parity map](../docs/toolkit-parity.md).
-
-- [`pull.php`: установка и обновление на хостинге](pull-php.md): настройка, аутентификация, загрузка версии, история, откат, автоматические проверки и сохранение локальных файлов.
-- [Панель управления и AI-подключения](control-panel.md): обратная связь, локализация и переиспользуемые провайдеры AI.
+- [Administration and verified account](admin-layout.md): layout, first use, email codes, recovery and preservation.
+- [Installer](pull-php.md): standalone setup, exact-commit installation, history, rollback and cron.
+- [Control panel](control-panel.md): model providers, feedback, authenticated settings and CSRF.
+- [LLM connector module index](llm_connector/index.md): file-to-spec mapping for models, parsing, mail and maintenance.
+- [Toolkit integration](005-toolkit-parity/spec.md) and [capability verification](toolkit-parity.md).
+- [Russian onboarding](pull-panel-russian-onboarding.md).

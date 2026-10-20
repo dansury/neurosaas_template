@@ -18,7 +18,7 @@ The default interface is concise Russian, with an explicit remembered language s
 
 ## V. Bounded AI and toolkit integration
 
-The lightweight `lib/llm.php` API stays backward compatible while the optional toolkit remains isolated behind its authenticated route. Providers are configured and tested only on the operator's explicit action; automated verification never sends mail, calls paid AI, or creates GitHub issues. Canonical toolkit updates retain local settings and reporting remains opt-in.
+The instance-based `admin/llm_connector/adapter.php` API stays backward compatible while the optional toolkit remains isolated behind its authenticated route. Providers are configured and tested only on the operator's explicit action; automated verification never sends mail, calls paid AI, or creates GitHub issues. Canonical toolkit updates retain local settings and reporting remains opt-in.
 
 ## VI. Evidence before completion
 

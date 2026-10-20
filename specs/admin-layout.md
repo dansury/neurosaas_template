@@ -22,3 +22,6 @@ Deployment preserves account state and both current and legacy module data, envi
 
 ## Acceptance
 Exercise standalone setup, first deploy, admin redirect, password authentication before legacy enrollment, invalid CSRF, enrollment confirmation, wrong/expired/reused code, resend cooldown, reset, cookie invalidation, local-data migration, purge preservation, module settings and root navigation. Existing provider, document, SMTP MIME, diagnostic and self-maintenance contracts remain covered. Issue #15 closes only after these changes merge and verification passes.
+
+## Bundled engine and legacy installer
+The standalone root installer contains the same engine as admin/deployment/panel.php; only PULL_ROOT initialization differs. Administration always loads its bundled current engine. Before accepting requests, admin/index.php atomically upgrades an older preserved installer under the deployment lock, keeping all local config and state untouched. The account and module directories deny direct HTTP access. Module data migration uses same-filesystem atomic rename without overwriting existing destinations.

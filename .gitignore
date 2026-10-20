@@ -2,9 +2,14 @@
 /pull-state.json
 /pull-deploy.lock
 /ai-config.php
-/modules/site_yacloud_openrouter/data/
-/modules/site_yacloud_openrouter/selfheal/token.local.php
-/modules/site_yacloud_openrouter/.env
+/admin/llm_connector/data/
+/admin/llm_connector/selfheal/token.local.php
+/admin/llm_connector/.env
 .serena/
 __pycache__/
 *.pyc
+
+/admin/account/data/
+/admin/llm_connector/data/
+/admin/llm_connector/.env
+/admin/llm_connector/selfheal/token.local.php
