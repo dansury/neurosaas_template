@@ -8,6 +8,8 @@
 
 ## Первый запуск
 
+Full-archive installations may choose local mode when index.php, admin/index.php and the toolkit exist. This uses the same panel and verified-account gate without a repository or GitHub key. Local status/history explain that updates are manual; GitHub operations are rejected before network access. A later authenticated connection preserves all other local configuration. A single uploaded pull.php still uses GitHub installation. See 007-local-diagnostics/spec.md.
+
 1. При отсутствии `pull-config.php` GET-запрос показывает форму настройки, а POST с корректными данными создаёт конфигурацию на сервере.
 2. Администратор указывает репозиторий, ветку, подкаталог, часовой пояс, список дополнительно сохраняемых путей, опцию удаления лишних файлов и пароль панели.
 3. GitHub token хранится в серверном `pull-config.php`; переменная окружения `GITHUB_TOKEN` имеет приоритет над сохранённым значением.

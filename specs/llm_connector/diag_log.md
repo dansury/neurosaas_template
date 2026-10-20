@@ -6,6 +6,8 @@ admin page. Replaces `error_log()`, which an operator on shared hosting cannot r
 
 ## 1. Storage
 
+The host integration in `diagnostics.php` installs chained PHP warning/fatal capture over this store. Automatic captures exclude arbitrary error messages and retain relative PHP file, line and type. Fatal events seen by both the error handler and shutdown are recorded once. Authenticated feedback exports at most 100 recent warning/error events and 14,000 bytes, retaining only numeric technical context and safe relative PHP paths. The session freezes the preview; attachment is opt-in. See ../007-local-diagnostics/spec.md.
+
 ```
 TABLE diag_log    id INTEGER PK AUTOINCREMENT, ts TEXT, level TEXT, channel TEXT,
                   message TEXT, context TEXT NULL          -- context = JSON object

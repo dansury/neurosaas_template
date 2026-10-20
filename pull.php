@@ -54,6 +54,10 @@ if (!defined('NEUROSAAS_ADMIN') && is_file(PULL_ROOT . '/admin/index.php')
     exit;
 }
 init_panel();
+if (is_file(PULL_ROOT . '/admin/llm_connector/diagnostics.php')) {
+    require_once PULL_ROOT . '/admin/llm_connector/diagnostics.php';
+    \NeuroSaaS\Diagnostics::boot();
+}
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') check_csrf();
 
 $configPath = PULL_ROOT . '/' . CONFIG_FILE;
@@ -136,12 +140,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action !== '' && $action !== 'depl
     exit;
 }
 if (isset($_GET['feedback'])) { render_feedback(); exit; }
+if (isset($_GET['diagnostics'])) { render_diagnostics_page(); exit; }
 if (!isset($_GET['status']) && !isset($_GET['watch']) && !isset($_GET['history'])
     && !isset($_GET['check']) && !$plain && $action !== 'deploy') {
     render_dashboard($config); exit;
 }
 
 
+// Local uploads must never enter the GitHub resolver/deployer, including cron and rollback.
+if (is_local_install($config)) {
+    if (isset($_GET['watch'])) { render_dashboard($config); exit; }
+    if (isset($_GET['status'])) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['ok' => true, 'mode' => 'local', 'auto' => false, 'changed' => false, 'sha' => '', 'deployed' => '']); exit;
+    }
+    if (isset($_GET['history'])) { page_start(ui('Version history', 'История версий')); echo '<section><p>' . ui('Files were uploaded manually. No GitHub deployment history exists yet.', 'Файлы загружены вручную. Истории установок из GitHub пока нет.') . '</p><a href="?">← ' . ui('Back to panel', 'Вернуться в панель') . '</a></section>'; page_end(); exit; }
+    http_response_code(409);
+    if ($plain) { header('Content-Type: text/plain; charset=utf-8'); exit("STATUS: ERROR\nLocal installation: connect GitHub in administration before deploying.\n"); }
+    render_dashboard($config, ui('Connect GitHub before installing updates.', 'Для установки обновлений сначала подключите GitHub.'), true); exit;
+}
 // Read-only endpoints. None of them touch the target directory.
 if (isset($_GET['status']))  { emit_status_json($config, $ghToken); exit; }
 if (isset($_GET['watch']))   { render_watch_page($config);          exit; }
@@ -429,6 +446,7 @@ function load_config(string $path): array {
         exit("pull-config.php must return an array\n");
     }
     return [
+        'installation_mode' => ($raw['installation_mode'] ?? '') === 'local' ? 'local' : 'github',
         'repo'       => (string)($raw['repo']       ?? ''),
         'branch'     => (string)($raw['branch']     ?? 'main'),
         'subdir'     => (string)($raw['subdir']     ?? '.'),
@@ -997,7 +1015,45 @@ function auth_is_https(): bool {
 }
 
 
+function local_upload_available(): bool {
+    foreach (['index.php', 'admin/index.php', 'admin/llm_connector/toolkit.php'] as $path) {
+        if (!is_file(PULL_ROOT . '/' . $path)) return false;
+    }
+    return true;
+}
+function is_local_install(array $config): bool {
+    return ($config['installation_mode'] ?? '') === 'local';
+}
+function render_local_setup(array $values, array $errors): void {
+    page_start(ui('Files are already uploaded', 'Файлы уже загружены'));
+    echo '<p>' . ui('Use the same administration without GitHub downloads. Email verification is still required. AI, mail and sending issues need their own network connections.', 'Откройте ту же админку без скачивания с GitHub. Подтверждение email остаётся обязательным. Для AI, почты и отправки задач нужен доступ к соответствующим сервисам.') . '</p>';
+    foreach ($errors as $error) echo '<p class="notice error">' . h(setup_error($error)) . '</p>';
+    echo '<section><form method="post">' . csrf_field() . '<input type="hidden" name="installation_mode" value="local">';
+    field('password', ui('Installation password', 'Пароль установки'), '', ui('At least 12 characters. Next: sign in and verify your email.', 'Не менее 12 символов. Далее войдите и подтвердите email.'), 'password');
+    field('timezone', ui('Time zone', 'Часовой пояс'), $values['timezone'] ?? 'Europe/Moscow');
+    echo '<button>' . ui('Open administration', 'Перейти к настройке админки') . '</button></form><p><a href="?">' . ui('Install from GitHub instead', 'Установка из GitHub') . '</a></p></section>';
+    page_end();
+}
+function render_repository_connection(): void {
+    echo '<section id="repository"><h2>' . ui('Connect GitHub later', 'Подключить GitHub') . '</h2><p>' . ui('Optional: enable repository updates and feedback. Local account and settings are preserved. Connecting does not install a version.', 'Необязательно: включите обновления из репозитория и отправку идей. Учётная запись и настройки сохранятся. Подключение само по себе не устанавливает версию.') . '</p><details><summary>' . ui('Configure connection', 'Настроить подключение') . '</summary><form method="post">' . csrf_field() . '<input type="hidden" name="action" value="connect_repository">';
+    field('repo', ui('Your repository', 'Ваш репозиторий'), '', 'owner/name');
+    field('branch', ui('Branch', 'Ветка'), 'main');
+    field('gh_token', ui('GitHub access key', 'Ключ доступа GitHub'), '', ui('Contents: Read; Issues: Read and write. No connection test runs when saving.', 'Contents: Read; Issues: Read and write. Сохранение не запускает проверку подключения.'), 'password');
+    echo '<button>' . ui('Save connection', 'Сохранить подключение') . '</button></form></details></section>';
+}
+function diagnostic_snapshot(): string {
+    if (!class_exists('NeuroSaaS\\Diagnostics', false)) return '';
+    return \NeuroSaaS\Diagnostics::snapshot();
+}
+function render_diagnostics_page(): void {
+    page_start(ui('Local diagnostics', 'Локальная диагностика'));
+    $snapshot = diagnostic_snapshot();
+    echo '<section><p>' . ui('Stored on this server. Nothing is sent from this page. Exports include technical locations and error types, without customer payloads or credentials.', 'Журнал хранится на этом сервере. Эта страница ничего не отправляет. В выгрузке — места и типы ошибок, без содержимого запросов и секретов.') . '</p><label for="diagnostic-log">' . ui('Technical log: select and copy', 'Технический журнал: выделите и скопируйте') . '</label><textarea id="diagnostic-log" readonly rows="18">' . h($snapshot !== '' ? $snapshot : ui('Diagnostics become available after installation.', 'Диагностика станет доступна после установки.')) . '</textarea><p><a href="?feedback=1">' . ui('Request a change', 'Заказать доработку') . '</a></p></section>';
+    page_end();
+}
 function handle_setup_post(string $configPath): void {
+    $local = ($_POST['installation_mode'] ?? '') === 'local';
+    if ($local && !local_upload_available()) { http_response_code(422); render_setup_form([], ['Upload the complete archive before choosing local installation.']); return; }
     $repo     = trim((string)($_POST['repo']     ?? ''));
     $branch   = trim((string)($_POST['branch']   ?? 'main'));
     $subdir   = trim((string)($_POST['subdir']   ?? '.'));
@@ -1011,8 +1067,8 @@ function handle_setup_post(string $configPath): void {
     $intRaw   = trim((string)($_POST['auto_interval'] ?? ''));
 
     $errors = [];
-    if (strlen($password) < 6) {
-        $errors[] = 'password must be at least 6 characters';
+    if (strlen($password) < ($local ? 12 : 6) || ($local && strlen($password) > 512)) {
+        $errors[] = $local ? ui('Use a password of 12–512 characters.', 'Используйте пароль от 12 до 512 символов.') : 'password must be at least 6 characters';
     }
     $prNumber = (int)$prRaw;
     if ($prRaw !== '' && !preg_match('~^[0-9]+$~', $prRaw)) {
@@ -1030,7 +1086,7 @@ function handle_setup_post(string $configPath): void {
     if ($interval < AUTO_INTERVAL_MIN) {
         $errors[] = 'check interval must be at least ' . AUTO_INTERVAL_MIN . ' seconds';
     }
-    if ($repo === '' || !preg_match('~^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$~', $repo)) {
+    if (!$local && ($repo === '' || !preg_match('~^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$~', $repo))) {
         $errors[] = 'repo must look like "owner/name"';
     }
     if ($branch === '') $branch = 'main';
@@ -1050,6 +1106,7 @@ function handle_setup_post(string $configPath): void {
 
     if ($errors) {
         render_setup_form([
+            'installation_mode' => $local ? 'local' : 'github',
             'repo' => $repo, 'branch' => $branch, 'subdir' => $subdir,
             'purge' => $purge,
             'timezone' => $timezone, 'keep_files' => implode(', ', $keepFiles),
@@ -1059,22 +1116,24 @@ function handle_setup_post(string $configPath): void {
     }
 
     $config = [
-        'repo'          => $repo,
+        'installation_mode' => $local ? 'local' : 'github',
+        'repo'          => $local ? '' : $repo,
         'branch'        => $branch,
         'subdir'        => $subdir,
-        'gh_token'      => $ghToken,
+        'gh_token'      => $local ? '' : $ghToken,
         'keep_files'    => $keepFiles,
         'timezone'      => $timezone,
         'password_hash' => $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : '',
-        'purge'         => $purge,
-        'source'        => $source,
-        'pr_number'     => $prNumber,
-        'auto_pull'     => $autoPull,
+        'purge'         => !$local && $purge,
+        'source'        => $local ? 'branch' : $source,
+        'pr_number'     => $local ? 0 : $prNumber,
+        'auto_pull'     => !$local && $autoPull,
         'auto_interval' => $interval,
     ];
 
     if (!save_php_config($configPath, $config)) {
         render_setup_form([
+            'installation_mode' => $local ? 'local' : 'github',
             'repo' => $repo, 'branch' => $branch, 'subdir' => $subdir,
             'purge' => $purge,
             'timezone' => $timezone, 'keep_files' => implode(', ', $keepFiles),
@@ -1151,9 +1210,13 @@ function render_login_form(array $errors = []): void {
     echo '<button>' . ui('Sign in', 'Войти') . '</button></form><p><a href="?account=reset">Забыли пароль?</a></p></section>'; page_end();
 }
 function render_setup_form(array $values = [], array $errors = []): void {
+    if (local_upload_available() && (($values['installation_mode'] ?? $_GET['install'] ?? '') === 'local')) {
+        render_local_setup($values, $errors); return;
+    }
     page_start(ui('Connect your GitHub repository', 'Подключите репозиторий GitHub'));
     echo '<p>' . ui('This assistant copies your project to this server. Start with the repository and access key; each setting is explained below.', 'Этот помощник переносит проект на сервер. Начните с репозитория и ключа доступа — у каждого параметра есть пояснение.') . '</p>';
     foreach ($errors as $error) echo '<p class="notice error">' . h(setup_error($error)) . '</p>';
+    if (local_upload_available()) echo '<section><h2>' . ui('Already uploaded all files?', 'Уже загрузили все файлы?') . '</h2><p>' . ui('Use the same administration without a repository or GitHub key.', 'Откройте ту же админку без репозитория и ключа GitHub.') . '</p><a class="button secondary" href="?install=local">' . ui('Files are already uploaded', 'Файлы уже загружены — настроить без GitHub') . '</a></section>';
     echo '<section><form method="post">' . csrf_field();
     field('repo', ui('Repository', 'Репозиторий'), $values['repo'] ?? '', ui('Copy owner/name from github.com/owner/name.', 'Скопируйте owner/name из адреса github.com/owner/name.'));
     field('branch', ui('Branch', 'Ветка'), $values['branch'] ?? 'main', ui('Usually main. Updates are taken from this branch.', 'Обычно main. Обновления будут браться из этой ветки.'));
@@ -1186,6 +1249,7 @@ function setup_error(string $message): string {
     return ui($message, $map[$message] ?? $message);
 }
 function render_setup_done(array $config): void {
+    if (is_local_install($config)) { page_start(ui('Local setup saved', 'Локальная установка настроена')); echo '<section><p>' . ui('Files are ready. Sign in with the installation password, then verify your email.', 'Файлы готовы. Войдите с паролем установки, затем подтвердите email.') . '</p><a class="button" href="?">' . ui('Continue to administration', 'Продолжить настройку админки') . '</a><p><a href="../">' . ui('Open site', 'Открыть сайт') . '</a></p></section>'; page_end(); return; }
     page_start(ui('Your connection is ready', 'Подключение настроено'));
     echo '<section><p>' . ui('Settings saved. Open the panel to install your first version and set up AI connections.', 'Настройки сохранены. Откройте панель, чтобы установить первую версию и подключить нейросети.') . '</p><a class="button" href="?">' . ui('Open control panel', 'Открыть панель') . '</a></section>'; page_end();
 }
@@ -1214,12 +1278,19 @@ function render_history_page(array $config): void {
 function render_watch_page(array $config): void { render_dashboard($config); }
 function render_dashboard(array $config, string $message = '', bool $error = false): void {
     page_start(ui('Your service, under control', 'Ваш сервис под контролем'));
-    echo '<p>' . h($config['repo']) . ' · ' . h($config['source'] === 'pr' ? 'PR #' . $config['pr_number'] : $config['branch']) . '</p>';
+    echo '<p><a href="?diagnostics=1">' . ui('Local diagnostics', 'Локальная диагностика') . '</a></p>';
+    if (is_local_install($config)) echo '<p class="notice">' . ui('Local installation: files uploaded manually. GitHub checks are off.', 'Локальная установка: файлы загружены вручную. Проверки GitHub выключены.') . '</p>';
+    if (!is_local_install($config)) echo '<p>' . h($config['repo']) . ' · ' . h($config['source'] === 'pr' ? 'PR #' . $config['pr_number'] : $config['branch']) . '</p>';
     if ($message !== '') echo '<p role="status" class="notice ' . ($error ? 'error' : 'success') . '">' . h($message) . '</p>';
+    if (is_local_install($config)) {
+        echo '<section><h2>' . ui('Updates', 'Обновления') . '</h2><p id="status">' . ui('Update files manually or connect GitHub below.', 'Загружайте обновления вручную или подключите GitHub ниже.') . '</p></section>';
+        render_repository_connection();
+    } else {
     echo '<section><h2>' . ui('Updates', 'Обновления') . '</h2><p id="status" class="status" role="status">' . ui('Checking for updates…', 'Проверяем обновления…') . '</p><p id="version"></p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="deploy"><button>' . ui('Update', 'Обновить') . '</button><a href="?history=1">' . ui('Previous versions', 'Предыдущие версии') . '</a></form><details><summary>' . ui('Automatic update settings', 'Настройки автообновления') . '</summary><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="auto">';
     checkbox('auto_pull', ui('Install new versions while this panel is open', 'Устанавливать новые версии, пока панель открыта'), $config['auto_pull']);
     field('auto_interval', ui('Interval in seconds', 'Интервал в секундах'), (string)$config['auto_interval'], ui('At least 15. Closing this page stops browser checks.', 'Не менее 15. После закрытия страницы проверки из браузера прекращаются.'), 'number');
     echo '<button class="secondary">' . ui('Save settings', 'Сохранить настройки') . '</button></form><p class="help">' . ui('For updates with the browser closed, ask your hosting provider to schedule the following cron command once a minute. If a password is set, pass it through the X-Pull-Password header.', 'Для обновлений при закрытом браузере попросите хостинг запускать эту команду cron раз в минуту. Если задан пароль, передайте его в заголовке X-Pull-Password.') . '</p><code>curl --fail -s -H "X-Pull-Password: YOUR_PANEL_PASSWORD" "https://YOUR_HOST/PATH/pull.php?check=1&amp;plain=1"</code></details></section>';
+    }
     echo '<section><h2>' . ui('Models, documents and mail', 'Модели, документы и почта') . '</h2><p><a class="button" href="?toolkit=1">' . ui('Open advanced settings', 'Открыть расширенные настройки') . '</a></p></section>';
     echo '<section id="security"><h2>' . ui('Panel password', 'Пароль панели') . '</h2><p>' . ui('Replace the password without exposing the current one.', 'Замените пароль, не раскрывая текущий.') . '</p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="password">';
     field('new_password', ui('New password', 'Новый пароль'), '', ui('At least 12 characters. It is saved only as a hash.', 'Не менее 12 символов. На сервере сохраняется только хеш.'), 'password');
@@ -1228,7 +1299,7 @@ function render_dashboard(array $config, string $message = '', bool $error = fal
     feedback_form();
     render_ai_settings();
     echo '<section id="embed-tip"><h2>' . ui('Make feedback easy to find', 'Сделайте обратную связь доступной') . '</h2><p>' . ui('Add this to your next development prompt. Click the text to copy it.', 'Добавьте это в следующий промпт для разработки. Нажмите на текст, чтобы скопировать.') . '</p><button type="button" class="secondary" id="copy-prompt">Embed pull.php feedback form directly into the interface of the service, so that users can immediately submit their complaints directly to the repository.</button><p id="copy-status" role="status"></p><label class="check"><input type="checkbox" id="hide-tip"><span>' . ui('Do not show again', 'Больше не показывать') . '</span></label></section>';
-    $js = ['csrf' => $_SESSION['pull_csrf'], 'interval' => $config['auto_interval'], 'auto' => $config['auto_pull'], 'ru' => $GLOBALS['pull_language'] === 'ru'];
+    $js = ['local' => is_local_install($config), 'csrf' => $_SESSION['pull_csrf'], 'interval' => $config['auto_interval'], 'auto' => $config['auto_pull'], 'ru' => $GLOBALS['pull_language'] === 'ru'];
     echo '<script>window.panelConfig=' . json_encode($js, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>' . panel_js();
     page_end();
 }
@@ -1244,6 +1315,16 @@ function feedback_form(): void {
     echo '<form method="post" action="?feedback=1">' . csrf_field() . '<input type="hidden" name="action" value="feedback">';
     field('title', ui('Title (optional)', 'Название (необязательно)'), $title, ui('Leave empty to use a dated title.', 'Можно не заполнять: будет подставлено название с датой.'));
     field('description', ui('What should change?', 'Что нужно изменить?'), $description, ui('10–10,000 characters. Do not include secrets or customer personal data.', 'От 10 до 10 000 символов. Не указывайте секреты и персональные данные клиентов.'), 'textarea');
+    $snapshot = diagnostic_snapshot();
+    if ($snapshot !== '') {
+        $id = bin2hex(random_bytes(16));
+        $snapshots = $_SESSION['diagnostic_snapshots'] ?? [];
+        $snapshots[$id] = $snapshot;
+        $_SESSION['diagnostic_snapshots'] = array_slice($snapshots, -5, null, true);
+        checkbox('attach_diagnostics', ui('Attach the technical log shown below', 'Приложить технический журнал ниже'), isset($_POST['attach_diagnostics']));
+        echo '<input type="hidden" name="diagnostic_snapshot" value="' . h($id) . '"><p class="help">' . ui('Optional. Only this preview is sent with your idea. It contains error types and code locations, without request contents, customer data or keys.', 'Необязательно. Вместе с идеей будет отправлен только этот снимок: типы ошибок и места в коде, без содержимого запросов, данных клиентов и ключей.') . '</p><details><summary>' . ui('Preview diagnostic attachment', 'Посмотреть прикладываемый журнал') . '</summary><textarea readonly rows="10" aria-label="' . ui('Diagnostic attachment preview', 'Предпросмотр журнала') . '">' . h($snapshot) . '</textarea></details>';
+    }
+    if (is_local_install($config ?? [])) echo '<p class="notice">' . ui('Connect GitHub in the panel before sending. The text and log remain local until you submit.', 'Для отправки подключите GitHub в панели. До отправки текст и журнал остаются на сервере.') . '</p>';
     echo '<button>' . ui('Send idea', 'Отправить идею') . '</button></form></section>';
 }
 function render_feedback(string $message = '', bool $error = false, string $url = '', bool $celebrate = false, bool $tokenHelp = false): void {
@@ -1271,6 +1352,10 @@ function send_feedback(array $config, string $token): void {
         render_feedback(ui('Check the title and description lengths shown below.', 'Проверьте длину названия и описания: ограничения указаны под полями.'), true);
         return;
     }
+    if (is_local_install($config) || !preg_match('~^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$~D', $config['repo'])) {
+        http_response_code(422);
+        render_feedback(ui('Connect your GitHub repository in the panel before sending.', 'Перед отправкой подключите свой репозиторий GitHub в панели.'), true); return;
+    }
     if ($token === '') {
         http_response_code(422);
         render_feedback(ui('Add a GitHub key with Issues: Read and write to pull-config.php or GITHUB_TOKEN on your server.', 'Добавьте ключ GitHub с правом Issues: Read and write в pull-config.php или переменную GITHUB_TOKEN на сервере.'), true, '', false, true);
@@ -1280,6 +1365,15 @@ function send_feedback(array $config, string $token): void {
         http_response_code(429);
         render_feedback(ui('Please wait a minute before sending another message.', 'Подождите минуту перед следующим сообщением.'), true);
         return;
+    }
+    if (isset($_POST['attach_diagnostics'])) {
+        $id = (string)($_POST['diagnostic_snapshot'] ?? '');
+        $snapshot = $_SESSION['diagnostic_snapshots'][$id] ?? null;
+        if (!is_string($snapshot) || strlen($snapshot) > 14000) {
+            http_response_code(422);
+            render_feedback(ui('Reload and review the diagnostic attachment before sending.', 'Обновите страницу и проверьте журнал перед отправкой.'), true); return;
+        }
+        $body .= "\n\n### Диагностика — приложена пользователем\n\n```text\n" . str_replace("`", "'", $snapshot) . "\n```";
     }
     // A failed request also starts the cooldown, avoiding accidental repeated submissions.
     $_SESSION['feedback_at'] = time();
@@ -1355,6 +1449,20 @@ function save_php_config(string $path, array $config): bool {
 function handle_panel_post(array $config, string $token): void {
     $action = (string)($_POST['action'] ?? '');
     if ($action === 'feedback') { send_feedback($config, $token); exit; }
+    if (is_local_install($config) && $action === 'auto') { http_response_code(409); render_dashboard($config, ui('Connect GitHub first.', 'Сначала подключите GitHub.'), true); exit; }
+    if ($action === 'connect_repository') {
+        $repo = trim((string)($_POST['repo'] ?? ''));
+        $branch = trim((string)($_POST['branch'] ?? 'main'));
+        $key = trim((string)($_POST['gh_token'] ?? ''));
+        if (!preg_match('~^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$~D', $repo) || $branch === '' || strlen($branch) > 200 || preg_match('/[\\x00-\\x20\\x7f]/', $branch . $key)) {
+            http_response_code(422); render_dashboard($config, ui('Check repository, branch and key.', 'Проверьте репозиторий, ветку и ключ.'), true); exit;
+        }
+        $path = PULL_ROOT . '/pull-config.php';
+        $raw = require $path;
+        $next = array_replace($raw, ['installation_mode' => 'github', 'repo' => $repo, 'branch' => $branch, 'gh_token' => $key, 'source' => 'branch', 'pr_number' => 0, 'auto_pull' => false]);
+        if (!save_php_config($path, $next)) { http_response_code(422); render_dashboard($config, ui('Cannot save connection.', 'Не удалось сохранить подключение.'), true); exit; }
+        header('Location: ?', true, 303); exit;
+    }
     $ok = true; $message = ui('Settings saved.', 'Настройки сохранены.');
     if ($action === 'auto') {
         $interval = filter_var($_POST['auto_interval'] ?? '', FILTER_VALIDATE_INT);
@@ -1423,7 +1531,7 @@ function panel_js(): string {
  const c=window.panelConfig, t=(en,ru)=>c.ru?ru:en, status=document.querySelector('#status'),version=document.querySelector('#version');
  let busy=false, stopped=false;
  async function check(){
-  if(busy||stopped)return;busy=true;
+  if(c.local||busy||stopped)return;busy=true;
   try{
    const r=await fetch('?status=1',{cache:'no-store'});
    if(r.status===401){stopped=true;throw Error(t('Session expired. Reload and sign in.','Сессия истекла. Обновите страницу и войдите.'));}

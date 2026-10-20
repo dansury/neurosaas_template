@@ -4,6 +4,8 @@
 A single-file, uploadable pull.php remains the installation entry point. Keep branch/PR tracking, exact-commit downloads, preserved files, history and rollback. Replace the terminal interface with an accessible bilingual control panel. GET opens the panel; deployments and rollback from the UI require POST and CSRF. Existing explicit cron check/plain endpoints remain available. Serialize deploys with a filesystem lock.
 
 ## Feedback
+
+Feedback offers an unchecked diagnostic attachment option with a readonly preview of a frozen, bounded, redacted session snapshot. The submitted snapshot ID must match the preview. The snapshot is a text section in the issue body and needs no Contents-write permission. Without a connected repository/key, explain how to connect GitHub and do not send. Technical capture and local-mode contracts are in 007-local-diagnostics/spec.md.
 Authenticated panel and standalone ?feedback=1 form submit title and description to the configured repository through GitHub Issues. Token remains on the server. Require CSRF, length validation and a session cooldown; show actionable permission errors. Token creation links request Contents read, Issues write and optional Pull requests read. Do not include credentials or automatic page URLs in reports.
 
 Show the requested English embedding prompt with copy and persistent browser dismissal. Keep functional development-request navigation and the owner's consultation links to https://dansury.github.io and https://t.me/dansury.vj.
