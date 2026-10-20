@@ -32,6 +32,7 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
     start = source.index("    private static function deliver(")
     end = source.index("    public static function verified(", start)
     source = source[:start] + """    private static function deliver(string $email, string $code): void {
+        if (is_file(dirname(__DIR__, 2) . '/fail-mail')) throw new \\RuntimeException('SMTP delivery failed');
         file_put_contents(dirname(__DIR__, 2) . '/mail.json', json_encode(compact('email', 'code')));
     }
 
@@ -45,6 +46,7 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
         'password_hash'=>'HASH',
         'keep_files'=>[],'auto_pull'=>false,'auto_interval'=>60];""".replace("HASH", hashed)
     (work / "pull-config.php").write_text(config)
+    (work / "pull.php").write_text("<?php echo 'legacy installer';")
     # Local state from the previous layout must move before toolkit boot.
     legacy = work / "modules/site_yacloud_openrouter"
     (legacy / "data").mkdir(parents=True)
@@ -86,18 +88,24 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
         else:
             raise RuntimeError("PHP server did not start")
         expect(status == 401 and "Забыли пароль?" in html, "existing owner authenticates before enrollment")
+        expect("define('PULL_ROOT'" in (work / "pull.php").read_text() and (work / "pull-config.php").read_text() == config, "legacy installer upgrades without changing configuration")
         token = csrf(html)
         status, _ = request(data=send_fields(token))
         expect(status == 401 and not (work / "mail.json").exists(), "unauthenticated enrollment cannot send or take over")
         status, html = request(data=dict(csrf=token, password=password))
         expect(status == 200 and "Создайте учётную запись" in html, "authenticated owner sees enrollment")
         token = csrf(html)
-        status, html = request("/admin/?toolkit=1")
+        status, html = request("/pull.php?check=1&plain=1&toolkit=1")
         expect(status == 200 and "Создайте учётную запись" in html and "SMTP host" not in html, "settings blocked until email confirmation")
         status, _ = request(data=dict(account_action="send", email="owner@example.test"))
         expect(status == 403 and not (work / "mail.json").exists(), "account CSRF required")
         status, _ = request(data=send_fields(token, pwd="short"))
         expect(status == 200 and not (work / "mail.json").exists(), "weak password never sent")
+        (work / "fail-mail").touch()
+        status, html = request(data=send_fields(token))
+        expect(status == 200 and "Не удалось отправить письмо" in html and not (work / "mail.json").exists(), "mail failure keeps management closed with an actionable message")
+        expect("'admin_email_verified'" not in (work / "pull-config.php").read_text(), "failed delivery never verifies account")
+        (work / "fail-mail").unlink()
         status, html = request(data=send_fields(token))
         mail = json.loads((work / "mail.json").read_text())
         expect(status == 200 and re.fullmatch(r"[0-9]{6}", mail["code"]), "enrollment sends a six-digit code")

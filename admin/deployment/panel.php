@@ -46,7 +46,9 @@ const AUTH_SESSION_TTL  = 43200;   // without "remember me": 12 hours, session c
 if (defined('PULL_LIBRARY_ONLY')) return;
 // Once installed, all interactive controls are mounted under admin/.
 if (!defined('NEUROSAAS_ADMIN') && is_file(PULL_ROOT . '/admin/index.php')
-    && !(isset($_GET['check']) && isset($_GET['plain']))) {
+    && !(($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET'
+        && isset($_GET['check'], $_GET['plain'])
+        && array_diff(array_keys($_GET), ['check', 'plain']) === [])) {
     $query = (string)($_SERVER['QUERY_STRING'] ?? '');
     header('Location: admin/' . ($query !== '' ? '?' . $query : ''), true, 307);
     exit;

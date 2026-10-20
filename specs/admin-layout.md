@@ -25,3 +25,5 @@ Exercise standalone setup, first deploy, admin redirect, password authentication
 
 ## Bundled engine and legacy installer
 The standalone root installer contains the same engine as admin/deployment/panel.php; only PULL_ROOT initialization differs. Administration always loads its bundled current engine. Before accepting requests, admin/index.php atomically upgrades an older preserved installer under the deployment lock, keeping all local config and state untouched. The account and module directories deny direct HTTP access. Module data migration uses same-filesystem atomic rename without overwriting existing destinations.
+
+The root cron exception accepts only GET requests with check and plain parameters. Mixed toolkit, feedback or other query parameters and POST requests lead to administration and its verification gate. A mail delivery failure retains an unverified account and displays hosting/SMTP recovery instructions.
