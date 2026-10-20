@@ -99,7 +99,7 @@ with tempfile.TemporaryDirectory(prefix='neurosaas-http-') as work:
         expect(not (work / 'pull-state.json').exists() and not (work / 'pull-deploy.lock').exists(), 'GET and login never deploy')
         expect('FAKE_KEY' not in html and 'sample-pass' not in html, 'secrets never returned')
         expect('<details open><summary>Genrouter' in html and '<details><summary>Openrouter' in html, 'GenRouter starts open and OpenRouter stays collapsed')
-        expect('https://genrouter.ru/dashboard/keys' in html and 'интерактивная подписка' in html, 'GenRouter onboarding and API boundary shown')
+        expect('https://genrouter.ru/?ref=d97a170843' in html and 'интерактивная подписка' in html, 'GenRouter onboarding and API boundary shown')
         expect('Идеи для доработки' in html and 'owner/repo/issues' in html, 'feedback is renamed and links the repository')
         expect('может не работать на российских хостингах' in html and 'https://t.me/dansury.vj' in html, 'warning and links')
         expect('Embed pull.php feedback form directly into the interface of the service' in html and 'Больше не показывать' in html, 'embedding prompt and dismissal')
