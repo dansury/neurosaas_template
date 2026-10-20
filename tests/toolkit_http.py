@@ -88,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-toolkit-http-") as folder:
         direct = client.open(f"http://127.0.0.1:{port}/modules/site_yacloud_openrouter/setup.php").read().decode()
         expect("ВХОД В НАСТРОЙКИ" in direct, "host auth is never persisted into standalone module session")
         status, html = request("?feedback=1")
-        expect(status == 200 and "Заказать доработку" in html, "development request form wording")
+        expect(status == 200 and "Идеи для доработки" in html, "development request form wording")
         logs.flush(); logs.seek(0)
         log = logs.read()
         expect("Fatal error" not in log, "HTTP integration has no PHP fatal errors")

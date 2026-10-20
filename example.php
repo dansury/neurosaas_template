@@ -6,5 +6,5 @@ header('Content-Type: text/html; charset=utf-8');
 <title>Ваш ИИ-сервис</title><main><h1>Основа вашего ИИ-сервиса</h1>
 <p>Добавьте здесь свой рабочий процесс. Модели, документы, OCR и почта настраиваются в панели.</p>
 <p><a href="pull.php?toolkit=1">Настроить модели, документы и почту</a></p>
-<p><a href="pull.php?feedback=1">Заказать доработку</a></p></main></html>
+<p><a href="pull.php?feedback=1">Идеи для доработки</a></p></main></html>
 
