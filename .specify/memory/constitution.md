@@ -24,3 +24,7 @@ The instance-based `admin/llm_connector/adapter.php` API stays backward compatib
 
 Specifications describe intended behavior before non-trivial implementation. Tests cover the changed contract with offline fixtures, including security and failure paths. Work lands through a reviewable branch and pull request; completion requires merged code, a recheck of the applicable behavior, and closure of the resolved issue.
 
+
+## VII. Clean foundation and source attribution
+Fresh services start with a neutral white interface and no unrelated product branding, business logic or unused source archives. The standalone upload-and-install path must not acquire a build or package-manager prerequisite. Focused modules expose documented public APIs; their contracts and agent instructions stay synchronized with code. Preserve the original `https://github.com/dansury/neurosaas_template/` link in the root README until the developer explicitly requests its removal, including after renaming or adapting a service. Protect existing operator data and configuration when cleaning the template.
+

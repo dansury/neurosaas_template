@@ -4,6 +4,17 @@ When a github issue in my repo is resolved and PR is merged, close the issue.
 # PR MERGE
 When finished working in github, merge PRs.
 
+# Original template attribution
+The root README.md MUST retain a visible Markdown link to the original template repository: https://github.com/dansury/neurosaas_template/ . Preserve this exact destination when rewriting the README, renaming the project, rebranding it or developing a service from the template. Remove the link only when the developer explicitly asks to remove it. A link to a derived repository or to the template-generation page does not replace the original link.
+
+# Clean starter contract
+- A new user must be able to upload only pull.php and complete installation by following README.md and the installer. State PHP extensions, hosting permissions and email requirements clearly. Do not introduce a required Composer, Node.js, shell or frontend-build step into this path.
+- Keep the initial product a neutral, minimal service with a clean white interface across the welcome page, installer, administration, diagnostics and maintenance screens, including when the operating system uses a dark theme. Vendor names may identify real integrations; do not copy another project's branding, customer data, commercial workflows or unrequested promotions into the product. Preserve the owner's consultation and development-request links, including dansury.github.io and Telegram: dansury.vj.
+- Build focused modules with clear public entry points and descriptive names. Document public APIs, configuration precedence, security boundaries and non-obvious decisions with concise PHPDoc and module documentation. Avoid comments that merely repeat the code, unused dependencies, speculative abstractions and obsolete source archives.
+- Keep useful Markdown instructions: CLAUDE.MD and AGENTS.md guide agents; module READMEs explain integration; specs describe behavior and contracts; tests verify them. Update documentation with behavior changes, use specs/index.md for navigation and read only the relevant module contract.
+- Preserve existing operator settings, secrets, data, consent and rollback. Compatibility needed to protect an installed service is intentional; do not add unrelated legacy features to fresh services.
+- Verify changes with the offline suites and inspect rendered interface changes at desktop and mobile sizes. Never claim that an external integration works solely because its configuration was saved.
+
 # Service integration
 Every generated service interface must include admin/llm_connector/bootstrap.php before output and a visible «Заказать доработку» link to admin/?feedback=1. Use the authenticated admin/?toolkit=1 settings route for the canonical infrastructure; keep the original LLM adapter for GenRouter compatibility. Module maintenance must preserve local settings and reporting consent. Read specs/toolkit-parity.md before changing integration.
 

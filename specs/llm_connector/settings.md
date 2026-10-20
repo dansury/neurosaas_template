@@ -1,5 +1,9 @@
 # config.php · settings_store.php · setup.php — configuration & operator settings
 
+## Presentation
+
+The settings page and diagnostic textareas use a readable white/light palette and explicit light color scheme even with a dark system preference. Settings and diagnostic-action rows wrap within a mobile viewport without horizontal page scrolling. Diagnostic contents, copying, privacy and authentication behavior are unchanged.
+
 ## 1. `config.php` — resolution
 
 `require __DIR__ . '/config.php'` returns the config array. Per key, highest priority

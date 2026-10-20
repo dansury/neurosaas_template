@@ -1,5 +1,7 @@
 # selfheal — self-maintaining module layer
 
+Standalone installation and maintenance screens use a white background and explicit light color scheme regardless of system theme. This presentation contract does not change consent, authentication or the public API.
+
 Spec of `selfheal/`, `selfheal_install.php`, `selfheal_seal.php`,
 `selfheal_admin.php`, `module.json`. Infrastructural code, no customer TZ
 behind it — requirements come from one integration need: **the developer must

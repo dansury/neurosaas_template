@@ -5,7 +5,18 @@ header('Content-Type: text/html; charset=utf-8');
 ?><!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ваш новый сервис</title>
-<style>body{margin:0;background:#f4f7fc;color:#17243b;font:18px/1.6 system-ui,sans-serif}header{display:flex;justify-content:flex-end;padding:24px}a{color:#285cda}main{max-width:760px;margin:7vh auto;padding:30px}h1{font-size:clamp(36px,7vw,64px);line-height:1.1}p{color:#54627b}.card{padding:24px;background:white;border-radius:16px}</style></head>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #fff; color: #17243b; font: 18px/1.6 system-ui, sans-serif; }
+header { display: flex; justify-content: flex-end; padding: 24px; }
+a { color: #2357cc; text-underline-offset: 3px; }
+main { max-width: 820px; margin: 7vh auto; padding: 24px; }
+h1 { font-size: clamp(36px, 7vw, 64px); line-height: 1.1; }
+p { color: #54627b; }
+.card { padding: 24px; border: 1px solid #d9e1ed; border-radius: 16px; }
+@media (max-width: 600px) { main { margin: 3vh auto; padding: 20px; } .card { padding: 20px; } }
+</style></head>
 <body><header><a href="admin/">Админка →</a></header><main><h1>Hello, world!</h1>
 <p>Ваш сервис установлен и готов к работе. Эта страница — начало вашего будущего проекта.</p>
 <div class="card"><h2>С чего начать</h2><p>Откройте <a href="admin/">админку</a>, создайте пароль и подтвердите email кодом из письма.

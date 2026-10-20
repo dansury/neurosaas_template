@@ -3,6 +3,8 @@
 ## User contract
 The public index.php is a Russian welcome page with a top-right administration link. pull.php remains a standalone first installer; after installation its browser routes lead to admin/index.php. Updates, model configuration, SMTP and development requests are available only in administration. Successful installation displays a pulsing link to the site root, respecting reduced-motion preferences.
 
+The welcome page, installer and management shell use a neutral white background and explicit light color scheme regardless of system theme. The shell uses generic service labels and functional navigation, without unrelated product brands. Preserve the owner's personal consultation and development-request links. Keep the original template link in the root README until the developer explicitly requests removal. The installer has no dependency on separately uploaded CSS or build assets; useful Markdown contracts remain in the repository, while unused source archives are excluded.
+
 ## Layout
 Runtime infrastructure lives in admin/llm_connector, including its bootstrap, host adapter, toolkit, settings, document and mail services and maintenance files. Account handling lives in admin/account. All module specifications are under specs/llm_connector and technical documentation is under specs. Each README begins with a short Russian explanation of purpose and first use. Computer-only maintenance utilities live in Обслуживание_с_компьютера with a Russian README and script comments. No origin history or source manifest is shipped.
 

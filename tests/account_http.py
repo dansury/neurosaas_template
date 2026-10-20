@@ -132,6 +132,7 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
         expect(status == 200 and "Идеи для доработки" in html, "legacy browser route reaches authenticated administration")
         status, html = request("/index.php")
         expect(status == 200 and 'href="admin/"' in html and "Hello, world!" in html, "public welcome links to admin")
+        expect("color-scheme: light" in html and "background: #fff" in html and "NeuroSaaS" not in html, "public welcome uses a neutral white light-theme surface")
         expect((work / "admin/llm_connector/data/operator.txt").read_text() == "LOCAL", "legacy module data migrated")
         expect((work / "admin/llm_connector/.env").read_text() == "MIGRATION_FIXTURE=1", "legacy environment migrated")
         # Let the recovery test send again without waiting; this edits only the disposable fixture.

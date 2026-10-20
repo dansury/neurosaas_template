@@ -99,7 +99,7 @@ $h = static function ($v): string { return htmlspecialchars((string) $v, ENT_QUO
 <title><?= $h(Contract::MODULE) ?> — установка</title>
 <style>
   body{max-width:820px;margin:0 auto;padding:24px 16px;font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#111;background:#fff}
-  @media (prefers-color-scheme:dark){body{color:#e8e8ea;background:#141417}code,pre{background:#1e1e22}}
+  :root{color-scheme:light}
   h1{font-size:21px;margin:0 0 4px}
   ul{padding-left:20px}li{margin:3px 0}
   code,pre{background:#f3f4f6;border-radius:6px;padding:2px 6px;font-size:13px}
