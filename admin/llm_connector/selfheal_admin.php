@@ -39,7 +39,7 @@ $page = static function (string $body) use ($h): void {
        . '<meta name="viewport" content="width=device-width,initial-scale=1">'
        . '<title>' . $h(Contract::MODULE) . ' — обслуживание</title><style>'
        . 'body{max-width:860px;margin:0 auto;padding:24px 16px;font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#111;background:#fff}'
-       . '@media (prefers-color-scheme:dark){body{color:#e8e8ea;background:#141417}code{background:#1e1e22}}'
+       . ':root{color-scheme:light}'
        . 'h1{font-size:20px;margin:0 0 16px}code{background:#f3f4f6;border-radius:5px;padding:1px 5px;font-size:13px}'
        . 'input[type=password]{padding:8px;border-radius:6px;border:1px solid #bbb;width:240px}'
        . 'button{padding:8px 14px;border-radius:7px;cursor:pointer}'

@@ -70,6 +70,10 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-toolkit-http-") as folder:
         status, html = request("?toolkit=1")
         expect(status == 200 and "SMTP" in html and "каталог" in html.lower(), f"canonical settings render: {status} {html[:160]}")
         expect("setup.php#" not in html and "?toolkit=1#smtp" in html, "all module-local actions stay on authenticated mount")
+        expect("color-scheme: light" in html and "background: #fff" in html, "advanced settings explicitly retain the light theme")
+        for log_id in ["diag-errors", "diag-full"]:
+            log_area = re.search(r'<textarea[^>]+id="' + log_id + r'"[^>]*>', html).group(0)
+            expect("background:#fff;color:#17243b" in log_area, log_id + " stays readable on a white surface")
         forms = re.findall(r"<form\b.*?</form>", html, re.S)
         expect(forms and all('name="csrf"' in form for form in forms), "every module form has host CSRF")
         expect("отправ" in html.lower() and "nonce" in html.lower(), "consent and signed maintenance controls render")

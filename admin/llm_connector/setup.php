@@ -78,12 +78,15 @@ if (!$hostAuthenticated && empty($_SESSION['admin_authed'])) {
     <meta name="robots" content="noindex, nofollow">
     <title>llm_connector — setup (вход)</title>
     <style>
-      body { font-family: -apple-system, system-ui, sans-serif; background: #0c1018; color: #edf1f7; padding: 24px; }
-      .box { max-width: 340px; margin: 80px auto; background: #131a26; border: 1px solid #1f2735; padding: 28px 26px; }
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+input, select, textarea, button, .box { border-radius: 8px; }
+      body { font-family: -apple-system, system-ui, sans-serif; background: #fff; color: #17243b; padding: 24px; }
+      .box { max-width: 340px; margin: 80px auto; background: #fff; border: 1px solid #d9e1ed; padding: 28px 26px; }
       h1 { font-size: 20px; margin: 0 0 18px; }
-      input { width: 100%; padding: 10px 12px; background: #0c1018; color: #edf1f7; border: 1px solid #1f2735; font: inherit; margin-bottom: 14px; }
-      button { background: #00d4e8; color: #0c1018; border: 0; padding: 12px 18px; font-weight: 700; cursor: pointer; width: 100%; }
-      .err { color: #ff4560; font-size: 13px; margin: 0 0 12px; }
+      input { width: 100%; padding: 10px 12px; background: #fff; color: #17243b; border: 1px solid #d9e1ed; font: inherit; margin-bottom: 14px; }
+      button { background: #2357cc; color: #fff; border: 0; padding: 12px 18px; font-weight: 700; cursor: pointer; width: 100%; }
+      .err { color: #a82742; font-size: 13px; margin: 0 0 12px; }
     </style></head><body>
     <div class="box">
       <h1>ВХОД В НАСТРОЙКИ</h1>
@@ -307,17 +310,20 @@ if ($vision_cur !== '' && strpos($vision_cur, ':') === false) {
 <meta name="robots" content="noindex, nofollow">
 <title>llm_connector — настройки</title>
 <style>
-  body { font-family: -apple-system, system-ui, sans-serif; background: #0c1018; color: #edf1f7; padding: 24px; max-width: 720px; margin: 0 auto; }
-  h1 { font-size: 22px; } h2 { font-size: 16px; margin: 26px 0 10px; color: #00d4e8; }
-  .lede { color: #9fb0c8; font-size: 14px; }
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+input, select, textarea, button, .box { border-radius: 8px; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #fff; color: #17243b; padding: 24px; max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 22px; } h2 { font-size: 16px; margin: 26px 0 10px; color: #2357cc; }
+  .lede { color: #56657a; font-size: 14px; }
   label { display: block; margin: 12px 0; font-size: 14px; }
-  label span { display: block; color: #9fb0c8; margin-bottom: 4px; }
-  input, select { width: 100%; padding: 9px 11px; background: #131a26; color: #edf1f7; border: 1px solid #1f2735; font: inherit; }
-  button { background: #00d4e8; color: #0c1018; border: 0; padding: 12px 20px; font-weight: 700; cursor: pointer; }
-  .msg { padding: 10px 12px; margin: 8px 0; border: 1px solid #1f2735; font-size: 14px; }
-  .msg.ok { border-color: #1f6f4f; } .msg.bad { border-color: #ff4560; }
-  .row { display: flex; gap: 12px; } .row > * { flex: 1; }
-  a { color: #00d4e8; }
+  label span { display: block; color: #56657a; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 9px 11px; background: #fff; color: #17243b; border: 1px solid #d9e1ed; font: inherit; }
+  button { background: #2357cc; color: #fff; border: 0; padding: 12px 20px; font-weight: 700; cursor: pointer; }
+  .msg { padding: 10px 12px; margin: 8px 0; border: 1px solid #d9e1ed; font-size: 14px; }
+  .msg.ok { border-color: #1f6f4f; } .msg.bad { border-color: #a82742; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; } .row > * { flex: 1 1 220px; min-width: 0; }
+  a { color: #2357cc; }
 </style></head><body>
 <h1>llm_connector — настройки <a href="?logout=1" style="font-size:13px;float:right">выйти</a></h1>
 <p class="lede">Заполните только нужные поля — пустые значения не перезаписывают существующие. Значения сразу применяются ко всему сервису (overlay через таблицу <code>settings</code>).</p>
@@ -380,7 +386,7 @@ echo Selfheal\SelfHeal::adminNotice();
       <br>Живого каталога пока нет — в списках только вшитые модели.
     <?php endif; ?>
     <?php if ($live_error !== ''): ?>
-      <br><span style="color:#ff4560">Последняя попытка: <?= $h(mb_substr($live_error, 0, 200)) ?></span>
+      <br><span style="color:#a82742">Последняя попытка: <?= $h(mb_substr($live_error, 0, 200)) ?></span>
     <?php endif; ?>
   </p>
   <label><span>Срок годности кэша каталога, мин</span><input type="text" name="MODEL_CATALOG_TTL_MIN" placeholder="<?= $h((string) $live_ttl) ?>"></label>
@@ -480,7 +486,7 @@ echo Selfheal\SelfHeal::adminNotice();
     пароль <code>pull.php</code> берутся из <code>pull-config.php</code> рядом со скриптом —
     здесь их дублировать не нужно.
     <?php if ($ap_cfg === null): ?>
-      <br><span style="color:#ff4560">pull-config.php не найден (искали в <?= $h($ap_root) ?>) — включать нечего.</span>
+      <br><span style="color:#a82742">pull-config.php не найден (искали в <?= $h($ap_root) ?>) — включать нечего.</span>
     <?php else: ?>
       <br>Отслеживается: <b><?= $h($ap_cfg['repo']) ?></b> ·
       <?= $ap_cfg['source'] === 'pr' ? 'PR #' . (int) $ap_cfg['pr_number'] : 'ветка ' . $h($ap_cfg['branch']) ?>.
@@ -490,7 +496,7 @@ echo Selfheal\SelfHeal::adminNotice();
       <?= $ap_status['note'] !== '' ? '— ' . $h($ap_status['note']) : '' ?>.
     <?php endif; ?>
     <?php if ($ap_status['error'] !== ''): ?>
-      <br><span style="color:#ff4560">Ошибка: <?= $h(mb_substr($ap_status['error'], 0, 200)) ?></span>
+      <br><span style="color:#a82742">Ошибка: <?= $h(mb_substr($ap_status['error'], 0, 200)) ?></span>
     <?php endif; ?>
   </p>
   <label style="display:flex;align-items:center;gap:10px;">
@@ -549,10 +555,10 @@ $diag_errors = DiagLog::asText(DiagLog::tail(400, true), $diag_header, 'llm_conn
 <div class="row" style="margin-bottom:10px;">
   <button type="button" onclick="diagCopy('diag-full', this)">Скопировать полный лог</button>
   <button type="button" onclick="diagCopy('diag-errors', this)">Скопировать только ошибки</button>
-  <form method="post" style="flex:1;margin:0;"><button type="submit" name="diag_clear" value="1" style="width:100%">Очистить лог</button></form>
+  <form method="post" style="margin:0;"><button type="submit" name="diag_clear" value="1" style="width:100%">Очистить лог</button></form>
 </div>
-<label><span>Только ошибки</span><textarea id="diag-errors" readonly rows="10" style="width:100%;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;background:#131a26;color:#edf1f7;border:1px solid #1f2735;padding:9px 11px;"><?= $h($diag_errors) ?></textarea></label>
-<label><span>Полный лог</span><textarea id="diag-full" readonly rows="16" style="width:100%;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;background:#131a26;color:#edf1f7;border:1px solid #1f2735;padding:9px 11px;"><?= $h($diag_full) ?></textarea></label>
+<label><span>Только ошибки</span><textarea id="diag-errors" readonly rows="10" style="width:100%;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;background:#fff;color:#17243b;border:1px solid #d9e1ed;padding:9px 11px;"><?= $h($diag_errors) ?></textarea></label>
+<label><span>Полный лог</span><textarea id="diag-full" readonly rows="16" style="width:100%;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;background:#fff;color:#17243b;border:1px solid #d9e1ed;padding:9px 11px;"><?= $h($diag_full) ?></textarea></label>
 <script>
 function diagCopy(id, btn) {
   var el = document.getElementById(id);

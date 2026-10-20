@@ -1,6 +1,6 @@
 # Feature Specification: complete reusable AI infrastructure
 Created: 2026-10-16
-Input: "Приведи в соответствие! ... В самом ... neurosaas-template и ... kp-atlant замени ... на ... заказать доработку"
+Purpose: provide reusable AI, document, mail and maintenance infrastructure with a consistent development-request action.
 
 ## User stories
 ### US1 — Reuse the complete infrastructure (P1)

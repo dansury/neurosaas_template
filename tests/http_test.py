@@ -82,6 +82,7 @@ with tempfile.TemporaryDirectory(prefix='neurosaas-http-') as work:
         else:
             logs.flush(); logs.seek(0); raise RuntimeError('PHP server did not start: ' + logs.read())
         expect(status == 200 and '<html lang="ru">' in html, 'Russian is the default without geolocation')
+        expect('color-scheme:light' in html and 'background:#fff;color:var(--ink)' in html, 'standalone installer renders a white light-theme surface')
         expect('Issues — Read and write' in html and 'issues=write' in html, 'Issues write explained and prefilled')
         expect('terminal' not in html and '$ save_config' not in html, 'friendly setup')
         status, body = request(data={'repo': 'owner/repo'})
@@ -101,7 +102,8 @@ with tempfile.TemporaryDirectory(prefix='neurosaas-http-') as work:
         expect('<details open><summary>Genrouter' in html and '<details><summary>Openrouter' in html, 'GenRouter starts open and OpenRouter stays collapsed')
         expect('https://genrouter.ru/?ref=d97a170843' in html and 'интерактивная подписка' in html, 'GenRouter onboarding and API boundary shown')
         expect('Идеи для доработки' in html and 'owner/repo/issues' in html, 'feedback is renamed and links the repository')
-        expect('может не работать на российских хостингах' in html and 'https://t.me/dansury.vj' in html, 'warning and links')
+        expect('может не работать на российских хостингах' in html, 'provider hosting warning remains visible')
+        expect('Ваш сервис' in html and 'NeuroSaaS</title>' not in html and 'https://dansury.github.io' in html and 'https://t.me/dansury.vj' in html, 'neutral panel preserves owner consultation links')
         expect('Embed pull.php feedback form directly into the interface of the service' in html and 'Больше не показывать' in html, 'embedding prompt and dismissal')
         token = csrf(html)
         status, state = request('?status=1')
