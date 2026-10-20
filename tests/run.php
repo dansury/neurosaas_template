@@ -9,14 +9,14 @@ function expect(bool $condition, string $message): void {
     if (!$condition) throw new RuntimeException($message);
 }
 // Each regional setting and an explicit override, without geolocation network calls.
-foreach (['RU' => 'ru', 'BY' => 'ru', 'KZ' => 'ru', 'US' => 'en', '' => 'en'] as $country => $language) {
+foreach (['RU' => 'ru', 'BY' => 'ru', 'KZ' => 'ru', 'US' => 'ru', '' => 'ru'] as $country => $language) {
     $_SESSION = []; $_GET = []; $_SERVER['GEOIP_COUNTRY_CODE'] = $country;
     init_panel(); expect($GLOBALS['pull_language'] === $language, 'country ' . $country);
 }
 $_GET = ['lang' => 'en']; $_SERVER['GEOIP_COUNTRY_CODE'] = 'RU'; init_panel();
 expect($GLOBALS['pull_language'] === 'en', 'manual override');
 $_SESSION = []; $_GET = []; $_SERVER['GEOIP_COUNTRY_CODE'] = ''; $_SERVER['HTTP_CF_IPCOUNTRY'] = 'RU'; init_panel();
-expect($GLOBALS['pull_language'] === 'en', 'untrusted country header ignored');
+expect($GLOBALS['pull_language'] === 'ru', 'untrusted country header ignored');
 parse_str((string)parse_url(pat_url('owner/repo', true), PHP_URL_QUERY), $permissions);
 expect($permissions['contents'] === 'read' && $permissions['issues'] === 'write' && $permissions['pull_requests'] === 'read', 'token permissions');
 $hash = password_hash('example', PASSWORD_DEFAULT);

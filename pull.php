@@ -1078,7 +1078,7 @@ function init_panel(): void {
     $country = strtoupper((string)($_SERVER['GEOIP_COUNTRY_CODE'] ?? getenv('GEOIP_COUNTRY_CODE') ?: ''));
     if ($country === '' && getenv('PULL_TRUST_CLOUDFLARE') === '1') $country = strtoupper((string)($_SERVER['HTTP_CF_IPCOUNTRY'] ?? ''));
     if ($country === '' && function_exists('geoip_country_code_by_name')) $country = (string)@geoip_country_code_by_name((string)($_SERVER['REMOTE_ADDR'] ?? ''));
-    $GLOBALS['pull_language'] = $_SESSION['pull_language'] ?? (in_array($country, ['RU', 'BY', 'KZ'], true) ? 'ru' : 'en');
+    $GLOBALS['pull_language'] = $_SESSION['pull_language'] ?? 'ru';
     if (empty($_SESSION['pull_csrf'])) $_SESSION['pull_csrf'] = bin2hex(random_bytes(24));
 }
 function csrf_field(): string { return '<input type="hidden" name="csrf" value="' . h($_SESSION['pull_csrf']) . '">'; }
@@ -1093,7 +1093,7 @@ function check_csrf(): void {
 function page_start(string $title): void {
     header('Content-Type: text/html; charset=utf-8'); header('Cache-Control: no-store');
     header('Referrer-Policy: same-origin'); header('X-Content-Type-Options: nosniff');
-    echo '<!doctype html><html lang="' . h($GLOBALS['pull_language']) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>' . h($title) . ' · NeuroSaaS</title>' . terminal_css() . '</head><body><main><header><a class="brand" href="?">NeuroSaaS <small>control panel</small></a><nav><a href="?lang=ru">Русский</a> · <a href="?lang=en">English</a> · <a href="./">' . ui('Open service', 'Открыть сервис') . '</a></nav></header><h1>' . h($title) . '</h1>';
+    echo '<!doctype html><html lang="' . h($GLOBALS['pull_language']) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>' . h($title) . ' · NeuroSaaS</title>' . terminal_css() . '</head><body><main><header><a class="brand" href="?">NeuroSaaS <small>' . ui('control panel', 'панель управления') . '</small></a><nav><a href="?lang=ru">Русский</a> · <a href="?lang=en">English</a> · <a href="./">' . ui('Open service', 'Открыть сервис') . '</a></nav></header><h1>' . h($title) . '</h1>';
 }
 function page_end(): void {
     echo '<footer>' . ui('Need advice or a custom improvement?', 'Нужна консультация или доработка?') . ' <a href="https://dansury.github.io" target="_blank" rel="noopener">dansury.github.io</a> · <a href="https://t.me/dansury.vj" target="_blank" rel="noopener">Telegram: dansury.vj</a></footer></main></body></html>';
@@ -1194,6 +1194,10 @@ function render_dashboard(array $config, string $message = '', bool $error = fal
     field('auto_interval', ui('Interval in seconds', 'Интервал в секундах'), (string)$config['auto_interval'], ui('At least 15. Closing this page stops browser checks.', 'Не менее 15. После закрытия страницы проверки из браузера прекращаются.'), 'number');
     echo '<button class="secondary">' . ui('Save settings', 'Сохранить настройки') . '</button></form><p class="help">' . ui('For updates with the browser closed, ask your hosting provider to schedule the following cron command once a minute. If a password is set, pass it through the X-Pull-Password header.', 'Для обновлений при закрытом браузере попросите хостинг запускать эту команду cron раз в минуту. Если задан пароль, передайте его в заголовке X-Pull-Password.') . '</p><code>curl --fail -s -H "X-Pull-Password: YOUR_PANEL_PASSWORD" "https://YOUR_HOST/PATH/pull.php?check=1&amp;plain=1"</code></details></section>';
     echo '<section><h2>' . ui('Models, documents and mail', 'Модели, документы и почта') . '</h2><p><a class="button" href="?toolkit=1">' . ui('Open advanced settings', 'Открыть расширенные настройки') . '</a></p></section>';
+    echo '<section id="security"><h2>' . ui('Panel password', 'Пароль панели') . '</h2><p>' . ui('Replace the password without exposing the current one.', 'Замените пароль, не раскрывая текущий.') . '</p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="password">';
+    field('new_password', ui('New password', 'Новый пароль'), '', ui('At least 6 characters. It is saved only as a hash.', 'Не менее 6 символов. На сервере сохраняется только хеш.'), 'password');
+    field('new_password_confirm', ui('Repeat new password', 'Повторите новый пароль'), '', '', 'password');
+    echo '<button class="secondary">' . ui('Replace password', 'Заменить пароль') . '</button></form></section>';
     feedback_form();
     render_ai_settings();
     echo '<section id="embed-tip"><h2>' . ui('Make feedback easy to find', 'Сделайте обратную связь доступной') . '</h2><p>' . ui('Add this to your next development prompt. Click the text to copy it.', 'Добавьте это в следующий промпт для разработки. Нажмите на текст, чтобы скопировать.') . '</p><button type="button" class="secondary" id="copy-prompt">Embed pull.php feedback form directly into the interface of the service, so that users can immediately submit their complaints directly to the repository.</button><p id="copy-status" role="status"></p><label class="check"><input type="checkbox" id="hide-tip"><span>' . ui('Do not show again', 'Больше не показывать') . '</span></label></section>';
@@ -1202,32 +1206,67 @@ function render_dashboard(array $config, string $message = '', bool $error = fal
     page_end();
 }
 function feedback_form(): void {
-    echo '<section id="feedback"><h2>' . ui('Request a change', 'Заказать доработку') . '</h2><p>' . ui('Your message becomes an issue in the connected GitHub repository. Do not include passwords or private customer information.', 'Сообщение станет задачей в подключённом репозитории GitHub. Не указывайте пароли и личные данные клиентов.') . '</p><form method="post" action="?feedback=1">' . csrf_field() . '<input type="hidden" name="action" value="feedback">';
-    field('title', ui('Short title', 'Краткое название'), (string)($_POST['title'] ?? ''), ui('From 3 to 200 characters. What went wrong or what would you like to add?', 'От 3 до 200 символов. Что не работает или что вы хотите добавить?'));
-    field('description', ui('Details', 'Подробности'), (string)($_POST['description'] ?? ''), ui('10–10,000 characters. Describe what you did, what happened, and the result you expected.', '10–10 000 символов. Опишите свои действия, что произошло и какой результат вы ожидали.'), 'textarea');
-    echo '<button>' . ui('Request a change', 'Заказать доработку') . '</button></form></section>';
+    global $config;
+    $repo = (string)($config['repo'] ?? '');
+    $issuesUrl = preg_match('~^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$~', $repo) ? 'https://github.com/' . $repo . '/issues' : '';
+    $title = trim((string)($_POST['title'] ?? ''));
+    $description = trim((string)($_POST['description'] ?? ''));
+
+    echo '<section id="feedback"><h2>' . ui('Ideas for improvement', 'Идеи для доработки') . '</h2><p>' . ui('Your message becomes an issue in the connected GitHub repository. Do not include passwords or private customer information.', 'Сообщение станет задачей в подключённом репозитории GitHub. Не указывайте пароли и личные данные клиентов.') . '</p>';
+    if ($issuesUrl !== '') echo '<p><a target="_blank" rel="noopener" href="' . h($issuesUrl) . '">' . ui('Open repository issues', 'Открыть все задачи репозитория') . '</a></p>';
+    echo '<form method="post" action="?feedback=1">' . csrf_field() . '<input type="hidden" name="action" value="feedback">';
+    field('title', ui('Title (optional)', 'Название (необязательно)'), $title, ui('Leave empty to use a dated title.', 'Можно не заполнять: будет подставлено название с датой.'));
+    field('description', ui('What should change?', 'Что нужно изменить?'), $description, ui('10–10,000 characters. Do not include secrets or customer personal data.', 'От 10 до 10 000 символов. Не указывайте секреты и персональные данные клиентов.'), 'textarea');
+    echo '<button>' . ui('Send idea', 'Отправить идею') . '</button></form></section>';
 }
-function render_feedback(string $message = '', bool $error = false, string $url = ''): void {
-    page_start(ui('Request a change', 'Заказать доработку'));
-    if ($message !== '') echo '<p role="status" class="notice ' . ($error ? 'error' : 'success') . '">' . h($message) . ($url !== '' ? ' <a target="_blank" rel="noopener" href="' . h($url) . '">' . ui('Open issue', 'Открыть задачу') . '</a>' : '') . '</p>';
-    feedback_form(); page_end();
+function render_feedback(string $message = '', bool $error = false, string $url = '', bool $celebrate = false, bool $tokenHelp = false): void {
+    global $config;
+    $repo = (string)($config['repo'] ?? '');
+    $issuesUrl = preg_match('~^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$~', $repo) ? 'https://github.com/' . $repo . '/issues' : '';
+
+    page_start(ui('Ideas for improvement', 'Идеи для доработки'));
+    if ($message !== '') echo '<p role="status" class="notice ' . ($error ? 'error' : 'success') . '">' . h($message) . ($url !== '' ? ' <a target="_blank" rel="noopener" href="' . h($url) . '">' . ui('Open created issue', 'Открыть созданную задачу') . '</a>' : '') . '</p>';
+    if ($tokenHelp && $repo !== '') echo '<p class="help"><a target="_blank" rel="noopener" href="' . h(pat_url($repo, ($config['source'] ?? '') === 'pr')) . '">' . ui('Create or replace the GitHub access key', 'Создать или заменить ключ доступа GitHub') . '</a></p>';
+    if ($celebrate && $issuesUrl !== '') {
+        $prompt = 'resolve ' . $issuesUrl;
+        echo '<section class="success"><h2>' . ui('Your first idea is in the repository!', 'Первая идея уже в репозитории!') . '</h2><p>' . ui('You can send another idea or give an AI coding assistant this prompt:', 'Можно отправить ещё одну идею или передать AI-агенту эту команду:') . '</p><pre>' . h($prompt) . '</pre><a class="button secondary" target="_blank" rel="noopener" href="' . h($issuesUrl) . '">' . ui('Open issue list', 'Открыть список задач') . '</a></section>';
+    }
+    feedback_form();
+    page_end();
 }
 function send_feedback(array $config, string $token): void {
-    $title = trim((string)($_POST['title'] ?? '')); $body = trim((string)($_POST['description'] ?? ''));
+    $title = trim((string)($_POST['title'] ?? ''));
+    $body = trim((string)($_POST['description'] ?? ''));
+    if ($title === '') $title = 'Идея для доработки — ' . date('Y-m-d H:i');
     $length = static fn(string $v): int => preg_match_all('/./us', $v) ?: 0;
-    if ($length($title) < 3 || $length($title) > 200 || $length($body) < 10 || $length($body) > 10000) {
-        http_response_code(422); render_feedback(ui('Check the title and description lengths shown below.', 'Проверьте длину названия и описания: ограничения указаны под полями.'), true); return;
+    if ($length($title) > 200 || $length($body) < 10 || $length($body) > 10000) {
+        http_response_code(422);
+        render_feedback(ui('Check the title and description lengths shown below.', 'Проверьте длину названия и описания: ограничения указаны под полями.'), true);
+        return;
     }
-    if ($token === '') { http_response_code(422); render_feedback(ui('Add a GitHub key with Issues: Read and write to pull-config.php or GITHUB_TOKEN on your server.', 'Добавьте ключ GitHub с правом Issues: Read and write в pull-config.php или переменную GITHUB_TOKEN на сервере.'), true); return; }
-    if (time() - (int)($_SESSION['feedback_at'] ?? 0) < 60) { http_response_code(429); render_feedback(ui('Please wait a minute before sending another message.', 'Подождите минуту перед следующим сообщением.'), true); return; }
+    if ($token === '') {
+        http_response_code(422);
+        render_feedback(ui('Add a GitHub key with Issues: Read and write to pull-config.php or GITHUB_TOKEN on your server.', 'Добавьте ключ GitHub с правом Issues: Read and write в pull-config.php или переменную GITHUB_TOKEN на сервере.'), true, '', false, true);
+        return;
+    }
+    if (time() - (int)($_SESSION['feedback_at'] ?? 0) < 60) {
+        http_response_code(429);
+        render_feedback(ui('Please wait a minute before sending another message.', 'Подождите минуту перед следующим сообщением.'), true);
+        return;
+    }
     // A failed request also starts the cooldown, avoiding accidental repeated submissions.
     $_SESSION['feedback_at'] = time();
     [$code, $data] = github_create_feedback($config['repo'], $token, $title, $body);
     $url = (string)($data['html_url'] ?? '');
     if ($code !== 201 || strpos($url, 'https://github.com/' . $config['repo'] . '/issues/') !== 0) {
-        http_response_code(502); render_feedback(ui('Could not send feedback (GitHub HTTP ', 'Не удалось отправить отзыв (GitHub HTTP ') . $code . '). ' . ui('Check the key, repository access, Issues: Read and write permission, and that Issues are enabled. Retry after a minute.', 'Проверьте ключ, доступ к репозиторию, право Issues: Read and write и включены ли Issues. Повторите через минуту.'), true); return;
+        http_response_code(502);
+        render_feedback(ui('Could not send feedback (GitHub HTTP ', 'Не удалось отправить отзыв (GitHub HTTP ') . $code . '). ' . ui('Check the key, repository access, Issues: Read and write permission, and that Issues are enabled. Retry after a minute.', 'Проверьте ключ, доступ к репозиторию, право Issues: Read and write и включены ли Issues. Повторите через минуту.'), true, '', false, true);
+        return;
     }
-    unset($_POST['title'], $_POST['description']); render_feedback(ui('Thank you! Your message was sent.', 'Спасибо! Ваше сообщение отправлено.'), false, $url);
+    $celebrate = empty($_SESSION['feedback_welcome_shown']);
+    $_SESSION['feedback_welcome_shown'] = true;
+    unset($_POST['title'], $_POST['description']);
+    render_feedback(ui('Thank you! Your message was sent.', 'Спасибо! Идея отправлена.'), false, $url, $celebrate);
 }
 function github_create_feedback(string $repo, string $token, string $title, string $body): array {
     $headers = ['Accept: application/vnd.github+json', 'User-Agent: NeuroSaaS-feedback', 'X-GitHub-Api-Version: 2022-11-28', 'Content-Type: application/json', 'Authorization: Bearer ' . $token];
@@ -1250,15 +1289,18 @@ function ai_config(): array {
 }
 function render_ai_settings(): void {
     echo '<section><h2>' . ui('AI connections', 'Подключение нейросетей') . '</h2><p>' . ui('Connect one or more providers. If the first provider fails, the next configured provider is tried.', 'Подключите одного или нескольких провайдеров. Если первый не ответит, запрос перейдёт к следующему настроенному.') . '</p>';
+    echo '<p class="notice">' . ui('These providers answer requests from an already deployed service through an API. Building the service itself needs a separate interactive coding subscription such as ChatGPT, Claude or Kimi.', 'Эти нейросети отвечают по API внутри уже развёрнутого сервиса. Для разработки самого сервиса нужна отдельная интерактивная подписка — например ChatGPT, Claude или Kimi.') . '</p>';
     if (!is_file(__DIR__ . '/lib/llm.php')) { echo '<p>' . ui('Install the latest version first to load the AI connection module.', 'Сначала установите актуальную версию, чтобы загрузить модуль подключения нейросетей.') . '</p></section>'; return; }
     $cfg = ai_config();
     echo '<form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="ai">';
     field('order', ui('Provider order', 'Порядок провайдеров'), implode(', ', $cfg['order']), ui('Comma-separated: yandex, genrouter, openrouter. Disabled providers are skipped.', 'Через запятую: yandex, genrouter, openrouter. Отключённые провайдеры пропускаются.'));
-    foreach (LLM::PROVIDERS as $provider) {
+    $providers = ['genrouter', 'yandex', 'openrouter'];
+    foreach ($providers as $provider) {
         $p = $cfg[$provider];
-        echo '<details' . ($provider === 'yandex' ? ' open' : '') . '><summary>' . h(ucfirst($provider)) . '</summary>';
+        echo '<details' . ($provider === 'genrouter' ? ' open' : '') . '><summary>' . h(ucfirst($provider)) . '</summary>';
         if ($provider === 'openrouter') echo '<p class="notice">' . ui('OpenRouter may not work from Russian hosting providers. Test it from this server or configure a proxy for this provider.', 'OpenRouter может не работать на российских хостингах. Проверьте доступ с этого сервера или настройте прокси для этого провайдера.') . '</p>';
-        echo '<p class="help"><a target="_blank" rel="noopener" href="' . ($provider === 'yandex' ? 'https://console.yandex.cloud/' : ($provider === 'genrouter' ? 'https://genrouter.ru/' : 'https://openrouter.ai/settings/keys')) . '">' . ui('Get an API key in the provider account', 'Получить API-ключ в кабинете провайдера') . '</a></p>';
+        if ($provider === 'genrouter') echo '<p class="notice">' . ui('Start here: add an API key, choose a model, then save the provider order for fallback. This key is used by the deployed service.', 'Начните здесь: добавьте API-ключ, выберите модель и сохраните порядок резервирования. Этот ключ используется уже развёрнутым сервисом.') . '</p>';
+        echo '<p class="help"><a target="_blank" rel="noopener" href="' . ($provider === 'yandex' ? 'https://console.yandex.cloud/' : ($provider === 'genrouter' ? 'https://genrouter.ru/dashboard/keys' : 'https://openrouter.ai/settings/keys')) . '">' . ui('Get an API key in the provider account', 'Получить API-ключ в кабинете провайдера') . '</a></p>';
         checkbox($provider . '_enabled', ui('Use this provider', 'Использовать провайдера'), $p['enabled']);
         field($provider . '_key', ui('API key', 'API-ключ'), '', ($p['key'] !== '' ? ui('Key saved. Leave blank to keep it.', 'Ключ сохранён. Оставьте поле пустым, чтобы его не менять.') : ui('Paste the provider API key.', 'Вставьте API-ключ провайдера.')), 'password');
         checkbox($provider . '_clear_key', ui('Remove saved key', 'Удалить сохранённый ключ'), false);
@@ -1272,7 +1314,7 @@ function render_ai_settings(): void {
         checkbox($provider . '_clear_proxy', ui('Remove saved proxy', 'Удалить сохранённый прокси'), false);
         echo '</details>';
     }
-    echo '<button>' . ui('Save AI connections', 'Сохранить подключения') . '</button></form><p class="help">' . ui('Testing sends a small paid request. Catalog loading does not generate text. Save changes first.', 'Проверка отправляет небольшой платный запрос. Загрузка каталога не генерирует текст. Сначала сохраните изменения.') . '</p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="ai_test"><label>' . ui('Provider', 'Провайдер') . '<select name="provider"><option>yandex</option><option>genrouter</option><option>openrouter</option></select></label><button class="secondary" name="operation" value="test">' . ui('Test connection', 'Проверить подключение') . '</button><button class="secondary" name="operation" value="models">' . ui('Load model catalog', 'Загрузить каталог моделей') . '</button></form></section>';
+    echo '<button>' . ui('Save AI connections', 'Сохранить подключения') . '</button></form><p class="help">' . ui('Testing sends a small paid request. Catalog loading does not generate text. Save changes first.', 'Проверка отправляет небольшой платный запрос. Загрузка каталога не генерирует текст. Сначала сохраните изменения.') . '</p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="ai_test"><label>' . ui('Provider', 'Провайдер') . '<select name="provider"><option>genrouter</option><option>yandex</option><option>openrouter</option></select></label><button class="secondary" name="operation" value="test">' . ui('Test connection', 'Проверить подключение') . '</button><button class="secondary" name="operation" value="models">' . ui('Load model catalog', 'Загрузить каталог моделей') . '</button></form></section>';
 }
 function save_php_config(string $path, array $config): bool {
     $temp = tempnam(dirname($path), '.pull-config-');
@@ -1291,6 +1333,17 @@ function handle_panel_post(array $config, string $token): void {
         $interval = filter_var($_POST['auto_interval'] ?? '', FILTER_VALIDATE_INT);
         if ($interval === false || $interval < AUTO_INTERVAL_MIN || $interval > 86400) { $ok = false; $message = ui('Interval must be between 15 and 86400 seconds.', 'Интервал должен быть от 15 до 86400 секунд.'); }
         else { $config['auto_pull'] = isset($_POST['auto_pull']); $config['auto_interval'] = $interval; $raw = require __DIR__ . '/pull-config.php'; $ok = save_php_config(__DIR__ . '/pull-config.php', array_replace($raw, ['auto_pull' => $config['auto_pull'], 'auto_interval' => $interval])); }
+    } elseif ($action === 'password') {
+        $password = (string)($_POST['new_password'] ?? '');
+        $confirmation = (string)($_POST['new_password_confirm'] ?? '');
+        if (strlen($password) < 6 || !hash_equals($password, $confirmation)) {
+            $ok = false;
+            $message = ui('Enter the same new password twice; it must contain at least 6 characters.', 'Введите одинаковый новый пароль дважды: он должен содержать не менее 6 символов.');
+        } else {
+            $raw = require __DIR__ . '/pull-config.php';
+            $raw['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+            $ok = save_php_config(__DIR__ . '/pull-config.php', $raw);
+        }
     } elseif ($action === 'ai' || $action === 'ai_test') {
         try {
             $cfg = ai_config();
