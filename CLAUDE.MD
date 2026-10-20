@@ -5,17 +5,17 @@ When a github issue in my repo is resolved and PR is merged, close the issue.
 When finished working in github, merge PRs.
 
 # Service integration
-Every generated service interface must include lib/bootstrap.php before output and a visible «Заказать доработку» link to pull.php?feedback=1. Use the authenticated pull.php?toolkit=1 settings route for the canonical infrastructure; keep the original LLM adapter for GenRouter compatibility. Module maintenance must preserve local settings and reporting consent. Read docs/toolkit-parity.md before changing integration.
+Every generated service interface must include admin/llm_connector/bootstrap.php before output and a visible «Заказать доработку» link to admin/?feedback=1. Use the authenticated admin/?toolkit=1 settings route for the canonical infrastructure; keep the original LLM adapter for GenRouter compatibility. Module maintenance must preserve local settings and reporting consent. Read specs/toolkit-parity.md before changing integration.
 
 # SPEC-DRIVEN DEVELOPMENT
 
 1.0 Use GitHub Spec Kit (https://github.com/github/spec-kit): constitution, specification, technical plan, traceable tasks, analysis, implementation and verification. Follow the installed Spec Kit skill when available. Read specs/index.md, then only the relevant module specification before source code. Keep specs and tests in the repository.
-1.1 Lookup file -> spec mapping in spec.md. It is a thin navigation index — read once, then open ONE /spec/<module>.md for the relevant area. Never read the whole /spec/ folder.
+1.1 Lookup file -> spec mapping in specs/llm_connector/index.md. It is a thin navigation index — read once, then open ONE specs/llm_connector/<module>.md for the relevant area. Never read the whole /spec/ folder.
 
-1.2 For reference details (signatures, DB schemas, algorithms, flows, SEO contract, email flows, referrals, QR cards): open exactly one /spec/<module>.md that matches the module you are editing. If the detail is missing there, read the source file — do NOT pull another /spec/<module>.md unless needed.
+1.2 For reference details (signatures, DB schemas, algorithms, flows, SEO contract, email flows, referrals, QR cards): open exactly one specs/llm_connector/<module>.md that matches the module you are editing. If the detail is missing there, read the source file — do NOT pull another specs/llm_connector/<module>.md unless needed.
 
 1.3 Spec-driven workflow — for any new feature or non-trivial change:
-Read the relevant /spec/<module>.md.
+Read the relevant specs/llm_connector/<module>.md.
 Update that spec to describe the planned change (signatures, tables, flows, configs) — before writing any code.
 Implement code to match the updated spec.
 Specs describe actual functionality only — never changelogs or version history. For pure bug fixes that require no design decisions, step 2 may be skipped; update the spec after the fix if its content was inaccurate.

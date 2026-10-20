@@ -10,17 +10,16 @@ $temp = sys_get_temp_dir() . '/neurosaas-toolkit-' . bin2hex(random_bytes(6));
 mkdir($temp, 0700, true);
 try {
     $copied = 0;
-    copyTree(dirname(__DIR__) . '/lib', $temp . '/lib', [], $copied);
-    copyTree(dirname(__DIR__) . '/modules', $temp . '/modules', [], $copied);
+    copyTree(dirname(__DIR__) . '/admin/llm_connector', $temp . '/admin/llm_connector', [], $copied);
     file_put_contents($temp . '/ai-config.php', "<?php return " . var_export([
         'order' => ['yandex', 'genrouter', 'openrouter'],
         'yandex' => ['enabled' => true, 'key' => 'FAKE_YANDEX_SECRET', 'folder' => 'FAKE_FOLDER', 'model' => 'yandexgpt/latest'],
         'openrouter' => ['enabled' => true, 'key' => 'FAKE_OPENROUTER_SECRET', 'model' => 'test/model'],
     ], true) . ';');
-    unlink($temp . '/modules/site_yacloud_openrouter/.htaccess');
+    unlink($temp . '/admin/llm_connector/.htaccess');
     $_SERVER['HTTP_HOST'] = 'localhost:1234';
     $_SERVER['DOCUMENT_ROOT'] = $temp;
-    require $temp . '/lib/toolkit.php';
+    require $temp . '/admin/llm_connector/toolkit.php';
     $cfg = \NeuroSaaS\Toolkit::boot();
     toolkitExpect($cfg['YANDEX_API_KEY'] === 'FAKE_YANDEX_SECRET', 'legacy key migration');
     toolkitExpect($cfg['OPENROUTER_API_KEY'] === 'FAKE_OPENROUTER_SECRET', 'second provider migration');
@@ -57,20 +56,20 @@ try {
     ]);
     toolkitExpect(strpos($mime, 'multipart/mixed') !== false && strpos($mime, 'text/plain') !== false && strpos($mime, 'text/html') !== false, 'SMTP MIME alternatives and attachment');
     toolkitExpect(strpos($mime, base64_encode(file_get_contents($docx))) !== false || strpos($mime, substr(base64_encode(file_get_contents($docx)), 0, 60)) !== false, 'attachment bytes encoded');
-    $state = $temp . '/destination/modules/site_yacloud_openrouter/data';
+    $state = $temp . '/destination/admin/llm_connector/data';
     mkdir($state, 0700, true); file_put_contents($state . '/operator.db', 'KEEP');
-    $source = $temp . '/incoming/modules/site_yacloud_openrouter/data';
+    $source = $temp . '/incoming/admin/llm_connector/data';
     mkdir($source, 0700, true); file_put_contents($source . '/operator.db', 'OVERWRITE');
-    mkdir($temp . '/incoming/modules/site_yacloud_openrouter/selfheal', 0700, true);
-    mkdir($temp . '/destination/modules/site_yacloud_openrouter/selfheal', 0700, true);
-    file_put_contents($temp . '/incoming/modules/site_yacloud_openrouter/llm.php', 'new code');
-    file_put_contents($temp . '/destination/modules/site_yacloud_openrouter/selfheal/token.local.php', 'LOCAL');
+    mkdir($temp . '/incoming/admin/llm_connector/selfheal', 0700, true);
+    mkdir($temp . '/destination/admin/llm_connector/selfheal', 0700, true);
+    file_put_contents($temp . '/incoming/admin/llm_connector/llm.php', 'new code');
+    file_put_contents($temp . '/destination/admin/llm_connector/selfheal/token.local.php', 'LOCAL');
     file_put_contents($temp . '/destination/obsolete.txt', 'old');
     $count = 0; copyTree($temp . '/incoming', $temp . '/destination', ALWAYS_KEEP, $count);
     $files = $dirs = 0; purgeExtra($temp . '/incoming', $temp . '/destination', ALWAYS_KEEP, $files, $dirs);
     toolkitExpect(file_get_contents($state . '/operator.db') === 'KEEP', 'nested DB survives overwrite and purge');
-    toolkitExpect(file_get_contents($temp . '/destination/modules/site_yacloud_openrouter/selfheal/token.local.php') === 'LOCAL', 'local token survives purge');
-    toolkitExpect(file_get_contents($temp . '/destination/modules/site_yacloud_openrouter/llm.php') === 'new code' && !file_exists($temp . '/destination/obsolete.txt'), 'code updates while obsolete ordinary files are removed');
+    toolkitExpect(file_get_contents($temp . '/destination/admin/llm_connector/selfheal/token.local.php') === 'LOCAL', 'local token survives purge');
+    toolkitExpect(file_get_contents($temp . '/destination/admin/llm_connector/llm.php') === 'new code' && !file_exists($temp . '/destination/obsolete.txt'), 'code updates while obsolete ordinary files are removed');
     echo "$checks toolkit checks passed\n";
 } finally { cleanup($temp); }
 

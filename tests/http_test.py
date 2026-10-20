@@ -51,7 +51,7 @@ with tempfile.TemporaryDirectory(prefix='neurosaas-http-') as work:
     }
     if (defined('PULL_LIBRARY_ONLY')) return;''')
     (work / 'pull.php').write_text(source)
-    shutil.copytree(ROOT / 'lib', work / 'lib')
+    shutil.copytree(ROOT / 'admin' / 'llm_connector', work / 'admin' / 'llm_connector', ignore=shutil.ignore_patterns('data'))
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]

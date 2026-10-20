@@ -2,7 +2,7 @@
 declare(strict_types=1);
 define('PULL_LIBRARY_ONLY', true);
 require dirname(__DIR__) . '/pull.php';
-require dirname(__DIR__) . '/lib/llm.php';
+require dirname(__DIR__) . '/admin/llm_connector/adapter.php';
 $checks = 0;
 function expect(bool $condition, string $message): void {
     global $checks; ++$checks;

@@ -22,9 +22,11 @@
 
 declare(strict_types=1);
 
+if (!defined('PULL_ROOT')) define('PULL_ROOT', __DIR__);
+
 const CONFIG_FILE = 'pull-config.php';
 const STATE_FILE  = 'pull-state.json';
-const ALWAYS_KEEP = ['pull.php', 'pull-config.php', 'pull-state.json', 'pull-deploy.lock', 'ai-config.php', 'modules/site_yacloud_openrouter/data', 'modules/site_yacloud_openrouter/selfheal/token.local.php', 'modules/site_yacloud_openrouter/.env', 'modules/site_yacloud_openrouter/.htaccess'];
+const ALWAYS_KEEP = ["pull.php","pull-config.php","pull-state.json","pull-deploy.lock","ai-config.php","admin/account/data","admin/llm_connector/data","admin/llm_connector/.env","admin/llm_connector/.htaccess","admin/llm_connector/selfheal/token.local.php","modules/site_yacloud_openrouter/data","modules/site_yacloud_openrouter/.env","modules/site_yacloud_openrouter/.htaccess","modules/site_yacloud_openrouter/selfheal/token.local.php"];
 
 // Prefilled fine-grained token form: everything but the repository picker can be
 // set from the URL. See docs.github.com -> "Pre-filling personal access token details".
@@ -42,10 +44,19 @@ const AUTH_REMEMBER_TTL = 2592000; // "remember me" cookie lifetime: 30 days
 const AUTH_SESSION_TTL  = 43200;   // without "remember me": 12 hours, session cookie
 
 if (defined('PULL_LIBRARY_ONLY')) return;
+// Once installed, all interactive controls are mounted under admin/.
+if (!defined('NEUROSAAS_ADMIN') && is_file(PULL_ROOT . '/admin/index.php')
+    && !(($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET'
+        && isset($_GET['check'], $_GET['plain'])
+        && array_diff(array_keys($_GET), ['check', 'plain']) === [])) {
+    $query = (string)($_SERVER['QUERY_STRING'] ?? '');
+    header('Location: admin/' . ($query !== '' ? '?' . $query : ''), true, 307);
+    exit;
+}
 init_panel();
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') check_csrf();
 
-$configPath = __DIR__ . '/' . CONFIG_FILE;
+$configPath = PULL_ROOT . '/' . CONFIG_FILE;
 $plain      = isset($_GET['plain']);
 
 // First-run setup: render form (GET) or write config (POST)
@@ -87,11 +98,21 @@ if ($denied !== null) {
 
 $mode = isset($_GET['status']) ? 'json' : ($plain ? 'plain' : 'html');
 
-// Optional password gate. An empty password_hash means open access.
+if (defined('NEUROSAAS_ADMIN')) {
+    require_once PULL_ROOT . '/admin/llm_connector/migrate.php';
+    try { \NeuroSaaS\LayoutMigration::run(); }
+    catch (Throwable $e) { http_response_code(503); page_start('Обновление настроек'); echo '<p>' . h($e->getMessage()) . '</p>'; page_end(); exit; }
+    require_once PULL_ROOT . '/admin/account/gate.php';
+    if (($_GET['account'] ?? '') === 'reset') \NeuroSaaS\AdminAccount::gate($configPath, true);
+}
+// Existing deployment passwords authenticate the owner before enrollment.
 if ($config['password_hash'] !== '') {
     require_auth($config['password_hash'], $mode);
 }
 
+if (defined('NEUROSAAS_ADMIN')) {
+    \NeuroSaaS\AdminAccount::gate($configPath);
+}
 if (isset($_GET['toolkit'])) {
     // Never let the standalone module interpret the login POST as a settings save.
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['password'])) {
@@ -102,7 +123,7 @@ if (isset($_GET['toolkit'])) {
         http_response_code(403);
         exit('Set a panel password before opening advanced settings.');
     }
-    require_once __DIR__ . '/lib/toolkit.php';
+    require_once PULL_ROOT . '/admin/llm_connector/toolkit.php';
     try { \NeuroSaaS\Toolkit::settings((string)$_SESSION['pull_csrf']); }
     catch (Throwable $e) { http_response_code(503); echo 'Advanced settings require PHP curl, pdo_sqlite, zip, dom and mbstring with a writable module data directory.'; }
     exit;
@@ -138,7 +159,7 @@ $rollbackTo = trim((string)($_POST['rollback'] ?? ''));
 // a real HTTP status instead of a 200 with an error inside it. Streaming starts
 // right after, as it always did.
 // A stable lock inode is always preserved during deploy and purge.
-$deployLock = @fopen(__DIR__ . '/pull-deploy.lock', 'c');
+$deployLock = @fopen(PULL_ROOT . '/pull-deploy.lock', 'c');
 if ($deployLock === false || !flock($deployLock, LOCK_EX | LOCK_NB)) {
     http_response_code(409); start_output($plain);
     term(ui('Another update is running. Please try again shortly.', 'Другое обновление уже выполняется. Повторите чуть позже.'));
@@ -392,7 +413,9 @@ function print_finish_banner(
     if (empty($GLOBALS['TERM_PLAIN'])) {
         echo '</pre></details><p role="status" class="notice ' . ($ok ? 'success' : 'error') . '">'
             . ($ok ? ui('Service updated successfully.', 'Сервис успешно обновлён.') : ui('Update failed. Open technical details above and check the GitHub connection and hosting permissions.', 'Обновление не удалось. Откройте технические сведения выше и проверьте подключение GitHub и права на хостинге.'))
-            . '</p><details hidden><pre>';
+            . '</p>';
+        if ($ok) echo '<p><a class="button open-service" href="' . (defined('NEUROSAAS_ADMIN') ? '../' : './') . '">Открыть сайт →</a></p>';
+        echo '<details hidden><pre>';
     }
 }
 
@@ -432,7 +455,7 @@ function short_sha(string $sha): string {
 }
 
 function state_path(): string {
-    return __DIR__ . '/' . STATE_FILE;
+    return PULL_ROOT . '/' . STATE_FILE;
 }
 
 // The deploy log: which commit is currently live. Missing or unreadable = nothing deployed yet.
@@ -892,8 +915,7 @@ function require_auth(string $hash, string $mode): void {
     $supplied = null;
     foreach ([
         $_POST['password'] ?? null,
-        $_GET['password'] ?? null,
-        $_SERVER['HTTP_X_PULL_PASSWORD'] ?? null,
+                $_SERVER['HTTP_X_PULL_PASSWORD'] ?? null,
     ] as $candidate) {
         if (is_string($candidate) && $candidate !== '') { $supplied = $candidate; break; }
     }
@@ -960,6 +982,10 @@ function auth_cookie_clear(): void {
 
 // Scope the cookie to the directory the script lives in, not the whole host.
 function auth_cookie_path(): string {
+    if (defined('NEUROSAAS_ADMIN')) {
+        $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? '/admin/index.php'));
+        return rtrim(dirname(dirname($script)), '/.') . '/';
+    }
     $dir = str_replace('\\', '/', dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/pull.php')));
     return ($dir === '' || $dir === '.' || $dir === '/') ? '/' : rtrim($dir, '/') . '/';
 }
@@ -985,8 +1011,8 @@ function handle_setup_post(string $configPath): void {
     $intRaw   = trim((string)($_POST['auto_interval'] ?? ''));
 
     $errors = [];
-    if ($password !== '' && strlen($password) < 6) {
-        $errors[] = 'password must be at least 6 characters (or empty for no password)';
+    if (strlen($password) < 6) {
+        $errors[] = 'password must be at least 6 characters';
     }
     $prNumber = (int)$prRaw;
     if ($prRaw !== '' && !preg_match('~^[0-9]+$~', $prRaw)) {
@@ -1093,7 +1119,7 @@ function check_csrf(): void {
 function page_start(string $title): void {
     header('Content-Type: text/html; charset=utf-8'); header('Cache-Control: no-store');
     header('Referrer-Policy: same-origin'); header('X-Content-Type-Options: nosniff');
-    echo '<!doctype html><html lang="' . h($GLOBALS['pull_language']) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>' . h($title) . ' · NeuroSaaS</title>' . terminal_css() . '</head><body><main><header><a class="brand" href="?">NeuroSaaS <small>' . ui('control panel', 'панель управления') . '</small></a><nav><a href="?lang=ru">Русский</a> · <a href="?lang=en">English</a> · <a href="./">' . ui('Open service', 'Открыть сервис') . '</a></nav></header><h1>' . h($title) . '</h1>';
+    echo '<!doctype html><html lang="' . h($GLOBALS['pull_language']) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>' . h($title) . ' · NeuroSaaS</title>' . terminal_css() . '</head><body><main><header><a class="brand" href="?">NeuroSaaS <small>' . ui('control panel', 'панель управления') . '</small></a><nav><a href="?lang=ru">Русский</a> · <a href="?lang=en">English</a> · <a href="' . (defined('NEUROSAAS_ADMIN') ? '../' : './') . '">' . ui('Open service', 'Открыть сервис') . '</a></nav></header><h1>' . h($title) . '</h1>';
 }
 function page_end(): void {
     echo '<footer>' . ui('Need advice or a custom improvement?', 'Нужна консультация или доработка?') . ' <a href="https://dansury.github.io" target="_blank" rel="noopener">dansury.github.io</a> · <a href="https://t.me/dansury.vj" target="_blank" rel="noopener">Telegram: dansury.vj</a></footer></main></body></html>';
@@ -1103,6 +1129,7 @@ function terminal_css(): string {
 <style>
 :root{color-scheme:light;--ink:#17243b;--muted:#56657a;--accent:#2357cc;--border:#d9e1ed}
 *{box-sizing:border-box}body{margin:0;background:#f2f5fa;color:var(--ink);font:16px/1.6 system-ui,-apple-system,sans-serif}main{max-width:1040px;margin:auto;padding:28px 22px}header{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:38px}.brand{font-size:23px;font-weight:750;text-decoration:none}.brand small{display:block;color:var(--muted);font-size:12px;font-weight:500}a{color:var(--accent)}nav{font-size:14px}h1{font-size:32px;line-height:1.2}h2{font-size:22px;margin-top:0}h3{font-size:18px}section,.card{background:white;border:1px solid var(--border);border-radius:16px;padding:26px;margin:20px 0;box-shadow:0 5px 20px #1b355507}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.grid section{margin:0}p,.help{color:var(--muted)}label{display:block;font-weight:600;margin:16px 0 4px}label.check{display:flex;align-items:flex-start;gap:10px;font-weight:500}input:not([type=checkbox]),textarea,select{font:inherit;width:100%;padding:10px 12px;border:1px solid #bcc9dc;border-radius:8px;background:white;color:var(--ink)}input[type=checkbox]{width:18px;height:18px;margin-top:4px}input:focus,textarea:focus,select:focus{outline:3px solid #b5cdfc;outline-offset:1px}.help{font-size:14px;margin:5px 0 14px}button,.button{display:inline-block;font:inherit;font-weight:600;background:var(--accent);color:white;border:0;border-radius:9px;padding:11px 18px;cursor:pointer;text-decoration:none;margin:12px 8px 0 0}button:disabled{opacity:.5;cursor:wait}button.secondary{background:#e8effd;color:#244c9c}details{border:1px solid var(--border);border-radius:10px;padding:16px;margin:16px 0}summary{cursor:pointer;font-weight:650}pre,code{overflow-wrap:anywhere;white-space:pre-wrap;font-size:13px}pre{background:#f3f6fb;padding:18px;border-radius:9px;max-height:400px;overflow:auto}.notice{border-left:4px solid var(--accent);background:#edf3ff;padding:14px 18px;border-radius:7px}.error{border-color:#bb304b;background:#fff0f3;color:#86283b}.success{border-color:#14805d;background:#eaf8f2;color:#115c45}.status{font-size:20px;font-weight:650}footer{border-top:1px solid var(--border);margin-top:36px;padding:22px 0;color:var(--muted);font-size:14px}.row{padding:15px 0;border-bottom:1px solid var(--border)}.inline{display:inline-block;margin-right:10px}[hidden]{display:none!important}@media(max-width:600px){main{padding:18px 14px}section,.card{padding:19px}h1{font-size:27px}}
+.open-service{animation:service-pulse 1.5s ease-in-out infinite}@keyframes service-pulse{50%{box-shadow:0 0 0 9px #285cda30;transform:scale(1.025)}}@media(prefers-reduced-motion:reduce){.open-service{animation:none}}
 </style>
 CSS;
 }
@@ -1121,7 +1148,7 @@ function render_login_form(array $errors = []): void {
     echo '<section><p>' . ui('Use the password chosen when this server was set up.', 'Используйте пароль, который указали при настройке этого сервера.') . '</p><form method="post">' . csrf_field();
     field('password', ui('Password', 'Пароль'), '', '', 'password');
     checkbox('remember', ui('Remember me for 30 days on this device', 'Запомнить меня на этом устройстве на 30 дней'), false);
-    echo '<button>' . ui('Sign in', 'Войти') . '</button></form></section>'; page_end();
+    echo '<button>' . ui('Sign in', 'Войти') . '</button></form><p><a href="?account=reset">Забыли пароль?</a></p></section>'; page_end();
 }
 function render_setup_form(array $values = [], array $errors = []): void {
     page_start(ui('Connect your GitHub repository', 'Подключите репозиторий GitHub'));
@@ -1132,7 +1159,7 @@ function render_setup_form(array $values = [], array $errors = []): void {
     field('branch', ui('Branch', 'Ветка'), $values['branch'] ?? 'main', ui('Usually main. Updates are taken from this branch.', 'Обычно main. Обновления будут браться из этой ветки.'));
     field('gh_token', ui('GitHub access key', 'Ключ доступа GitHub'), '', ui('Required for feedback and private repositories. The key stays on this server.', 'Нужен для обратной связи и закрытых репозиториев. Ключ хранится только на сервере.'), 'password');
     echo '<a id="patbtn" class="button" target="_blank" rel="noopener" href="' . h(pat_url($values['repo'] ?? '', !empty($values['pr_number']))) . '">' . ui('Create access key', 'Создать ключ доступа') . '</a><p class="help">' . ui('Choose Only select repositories and select your repository. Permissions: Contents — Read, Issues — Read and write; Pull requests — Read for previews. Copy the generated key here.', 'Выберите Only select repositories и отметьте свой репозиторий. Права: Contents — Read, Issues — Read and write; для предпросмотра ещё Pull requests — Read. Скопируйте созданный ключ сюда.') . '</p>';
-    field('password', ui('Panel password', 'Пароль панели'), '', ui('At least 6 characters. Without a password, anyone with this URL can deploy and use feedback or AI tests.', 'Не менее 6 символов. Без пароля любой, кто знает адрес, сможет обновлять сервис, отправлять отзывы и проверять нейросети.'), 'password');
+    field('password', ui('Panel password', 'Пароль панели'), '', ui('Choose the installation password; email confirmation follows in administration.', 'Задайте пароль установки. После загрузки сайта админка попросит подтвердить email.'), 'password');
     checkbox('auto_pull', ui('Automatically install updates while the panel is open', 'Автоматически устанавливать обновления, пока панель открыта'), (bool)($values['auto_pull'] ?? true));
     field('auto_interval', ui('Check every, seconds', 'Проверять каждые, секунд'), (string)($values['auto_interval'] ?? 60), ui('Minimum 15 seconds. 60 seconds is a good starting point.', 'Минимум 15 секунд. Для начала подойдёт 60.'), 'number');
     echo '<details><summary>' . ui('Advanced settings', 'Дополнительные настройки') . '</summary>';
@@ -1189,13 +1216,13 @@ function render_dashboard(array $config, string $message = '', bool $error = fal
     page_start(ui('Your service, under control', 'Ваш сервис под контролем'));
     echo '<p>' . h($config['repo']) . ' · ' . h($config['source'] === 'pr' ? 'PR #' . $config['pr_number'] : $config['branch']) . '</p>';
     if ($message !== '') echo '<p role="status" class="notice ' . ($error ? 'error' : 'success') . '">' . h($message) . '</p>';
-    echo '<section><h2>' . ui('Updates', 'Обновления') . '</h2><p id="status" class="status" role="status">' . ui('Checking for updates…', 'Проверяем обновления…') . '</p><p id="version"></p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="deploy"><button>' . ui('Install latest version', 'Установить актуальную версию') . '</button><a href="?history=1">' . ui('Previous versions', 'Предыдущие версии') . '</a></form><details><summary>' . ui('Automatic update settings', 'Настройки автообновления') . '</summary><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="auto">';
+    echo '<section><h2>' . ui('Updates', 'Обновления') . '</h2><p id="status" class="status" role="status">' . ui('Checking for updates…', 'Проверяем обновления…') . '</p><p id="version"></p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="deploy"><button>' . ui('Update', 'Обновить') . '</button><a href="?history=1">' . ui('Previous versions', 'Предыдущие версии') . '</a></form><details><summary>' . ui('Automatic update settings', 'Настройки автообновления') . '</summary><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="auto">';
     checkbox('auto_pull', ui('Install new versions while this panel is open', 'Устанавливать новые версии, пока панель открыта'), $config['auto_pull']);
     field('auto_interval', ui('Interval in seconds', 'Интервал в секундах'), (string)$config['auto_interval'], ui('At least 15. Closing this page stops browser checks.', 'Не менее 15. После закрытия страницы проверки из браузера прекращаются.'), 'number');
     echo '<button class="secondary">' . ui('Save settings', 'Сохранить настройки') . '</button></form><p class="help">' . ui('For updates with the browser closed, ask your hosting provider to schedule the following cron command once a minute. If a password is set, pass it through the X-Pull-Password header.', 'Для обновлений при закрытом браузере попросите хостинг запускать эту команду cron раз в минуту. Если задан пароль, передайте его в заголовке X-Pull-Password.') . '</p><code>curl --fail -s -H "X-Pull-Password: YOUR_PANEL_PASSWORD" "https://YOUR_HOST/PATH/pull.php?check=1&amp;plain=1"</code></details></section>';
     echo '<section><h2>' . ui('Models, documents and mail', 'Модели, документы и почта') . '</h2><p><a class="button" href="?toolkit=1">' . ui('Open advanced settings', 'Открыть расширенные настройки') . '</a></p></section>';
     echo '<section id="security"><h2>' . ui('Panel password', 'Пароль панели') . '</h2><p>' . ui('Replace the password without exposing the current one.', 'Замените пароль, не раскрывая текущий.') . '</p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="password">';
-    field('new_password', ui('New password', 'Новый пароль'), '', ui('At least 6 characters. It is saved only as a hash.', 'Не менее 6 символов. На сервере сохраняется только хеш.'), 'password');
+    field('new_password', ui('New password', 'Новый пароль'), '', ui('At least 12 characters. It is saved only as a hash.', 'Не менее 12 символов. На сервере сохраняется только хеш.'), 'password');
     field('new_password_confirm', ui('Repeat new password', 'Повторите новый пароль'), '', '', 'password');
     echo '<button class="secondary">' . ui('Replace password', 'Заменить пароль') . '</button></form></section>';
     feedback_form();
@@ -1283,14 +1310,14 @@ function github_create_feedback(string $repo, string $token, string $title, stri
     return [$code, json_decode((string)$response, true) ?: []];
 }
 function ai_config(): array {
-    require_once __DIR__ . '/lib/llm.php';
-    $saved = is_file(__DIR__ . '/ai-config.php') ? require __DIR__ . '/ai-config.php' : [];
+    require_once PULL_ROOT . '/admin/llm_connector/adapter.php';
+    $saved = is_file(PULL_ROOT . '/ai-config.php') ? require PULL_ROOT . '/ai-config.php' : [];
     return array_replace_recursive(LLM::defaults(), is_array($saved) ? $saved : []);
 }
 function render_ai_settings(): void {
     echo '<section><h2>' . ui('AI connections', 'Подключение нейросетей') . '</h2><p>' . ui('Connect one or more providers. If the first provider fails, the next configured provider is tried.', 'Подключите одного или нескольких провайдеров. Если первый не ответит, запрос перейдёт к следующему настроенному.') . '</p>';
     echo '<p class="notice">' . ui('These providers answer requests from an already deployed service through an API. Building the service itself needs a separate interactive coding subscription such as ChatGPT, Claude or Kimi.', 'Эти нейросети отвечают по API внутри уже развёрнутого сервиса. Для разработки самого сервиса нужна отдельная интерактивная подписка — например ChatGPT, Claude или Kimi.') . '</p>';
-    if (!is_file(__DIR__ . '/lib/llm.php')) { echo '<p>' . ui('Install the latest version first to load the AI connection module.', 'Сначала установите актуальную версию, чтобы загрузить модуль подключения нейросетей.') . '</p></section>'; return; }
+    if (!is_file(PULL_ROOT . '/admin/llm_connector/adapter.php')) { echo '<p>' . ui('Install the latest version first to load the AI connection module.', 'Сначала установите актуальную версию, чтобы загрузить модуль подключения нейросетей.') . '</p></section>'; return; }
     $cfg = ai_config();
     echo '<form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="ai">';
     field('order', ui('Provider order', 'Порядок провайдеров'), implode(', ', $cfg['order']), ui('Comma-separated: yandex, genrouter, openrouter. Disabled providers are skipped.', 'Через запятую: yandex, genrouter, openrouter. Отключённые провайдеры пропускаются.'));
@@ -1332,17 +1359,17 @@ function handle_panel_post(array $config, string $token): void {
     if ($action === 'auto') {
         $interval = filter_var($_POST['auto_interval'] ?? '', FILTER_VALIDATE_INT);
         if ($interval === false || $interval < AUTO_INTERVAL_MIN || $interval > 86400) { $ok = false; $message = ui('Interval must be between 15 and 86400 seconds.', 'Интервал должен быть от 15 до 86400 секунд.'); }
-        else { $config['auto_pull'] = isset($_POST['auto_pull']); $config['auto_interval'] = $interval; $raw = require __DIR__ . '/pull-config.php'; $ok = save_php_config(__DIR__ . '/pull-config.php', array_replace($raw, ['auto_pull' => $config['auto_pull'], 'auto_interval' => $interval])); }
+        else { $config['auto_pull'] = isset($_POST['auto_pull']); $config['auto_interval'] = $interval; $raw = require PULL_ROOT . '/pull-config.php'; $ok = save_php_config(PULL_ROOT . '/pull-config.php', array_replace($raw, ['auto_pull' => $config['auto_pull'], 'auto_interval' => $interval])); }
     } elseif ($action === 'password') {
         $password = (string)($_POST['new_password'] ?? '');
         $confirmation = (string)($_POST['new_password_confirm'] ?? '');
-        if (strlen($password) < 6 || !hash_equals($password, $confirmation)) {
+        if (strlen($password) < (defined('NEUROSAAS_ADMIN') ? 12 : 6) || strlen($password) > 512 || !hash_equals($password, $confirmation)) {
             $ok = false;
-            $message = ui('Enter the same new password twice; it must contain at least 6 characters.', 'Введите одинаковый новый пароль дважды: он должен содержать не менее 6 символов.');
+            $message = ui('Enter the same new password twice; use at least 12 characters.', 'Введите одинаковый новый пароль дважды: не менее 12 символов.');
         } else {
-            $raw = require __DIR__ . '/pull-config.php';
+            $raw = require PULL_ROOT . '/pull-config.php';
             $raw['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
-            $ok = save_php_config(__DIR__ . '/pull-config.php', $raw);
+            $ok = save_php_config(PULL_ROOT . '/pull-config.php', $raw);
         }
     } elseif ($action === 'ai' || $action === 'ai_test') {
         try {
@@ -1369,7 +1396,7 @@ function handle_panel_post(array $config, string $token): void {
                     }
                     unset($p);
                 }
-                $ok = save_php_config(__DIR__ . '/ai-config.php', $cfg);
+                $ok = save_php_config(PULL_ROOT . '/ai-config.php', $cfg);
             } else {
                 $provider = (string)($_POST['provider'] ?? '');
                 if (!in_array($provider, LLM::PROVIDERS, true)) throw new RuntimeException('provider');

@@ -14,8 +14,10 @@ jobs:
           extensions: curl, pdo_sqlite, zip, dom, mbstring, openssl
       - run: find . -name '*.php' -not -path './.git/*' -exec php -l {} \;
       - run: php tests/run.php
+      - run: php tests/layout.php
       - run: php tests/toolkit.php
-      - run: for file in modules/site_yacloud_openrouter/tests/*.php; do php "$file" || exit 1; done
+      - run: for file in admin/llm_connector/tests/*.php; do php "$file" || exit 1; done
       - run: python3 tests/http_test.py
       - run: python3 tests/toolkit_http.py
+      - run: python3 tests/account_http.py
 

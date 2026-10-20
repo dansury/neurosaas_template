@@ -2,7 +2,7 @@
 
 ## Scope
 
-This specification applies to `pull.php`, its feedback endpoint, and the uploadable `example.php` starter interface. It does not alter the optional toolkit contract.
+This specification applies to `pull.php`, its feedback endpoint, and the uploadable `index.php` starter interface. It does not alter the optional toolkit contract.
 
 ## Russian-first setup
 
