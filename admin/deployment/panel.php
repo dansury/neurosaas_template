@@ -1320,6 +1320,7 @@ function render_dashboard(array $config, string $message = '', bool $error = fal
     if ($message !== '') echo '<p role="status" class="notice ' . ($error ? 'error' : 'success') . '">' . h($message) . '</p>';
     if (is_local_install($config)) {
         echo '<section><h2>' . ui('Updates', 'Обновления') . '</h2><p id="status">' . ui('Update files manually or connect GitHub below.', 'Загружайте обновления вручную или подключите GitHub ниже.') . '</p></section>';
+        if (!empty(state_read()['sha'])) echo '<p><a href="?history=1">Предыдущие версии и откат</a></p>';
         render_repository_connection();
     } else {
     echo '<section><h2>' . ui('Updates', 'Обновления') . '</h2><p id="status" class="status" role="status">' . ui('Checking for updates…', 'Проверяем обновления…') . '</p><p id="version"></p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="deploy"><button>' . ui('Update', 'Обновить') . '</button><a href="?history=1">' . ui('Previous versions', 'Предыдущие версии') . '</a></form><details><summary>' . ui('Automatic update settings', 'Настройки автообновления') . '</summary><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="auto">';
