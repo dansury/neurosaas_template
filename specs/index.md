@@ -18,3 +18,5 @@ Read CLAUDE.MD, then this index, then the relevant module contract before source
 
 
 - [Operator workflows](008-operator-workflows/spec.md): token discovery, archive/computer updates, feedback media and GenRouter-first controls.
+
+- [Workflow illustration](011-workflow-illustration/spec.md): original issue #25 diagram in installer, README and portfolio.
