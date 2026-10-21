@@ -1,6 +1,6 @@
 const {chromium}=require('playwright'),fs=require('fs'),assert=require('assert'),path=require('path'),os=require('os'),cp=require('child_process');
 const base=path.resolve(__dirname,'..'),root=fs.mkdtempSync(path.join(os.tmpdir(),'neurosaas-browser-'));
-fs.cpSync(base,root,{recursive:true,filter:p=>!/[\\/](?:\.git|data|node_modules|work|__pycache__)(?:[\\/]|$)/.test(p)});
+fs.cpSync(base,root,{recursive:true,filter:p=>!/[\\/](?:\.git|data|node_modules|work|__pycache__)(?:[\\/]|$)/.test(path.relative(base,p))});
 const stub=(source,name,body)=>source.replace(new RegExp('function '+name+'\\([^\\n]+\\n[\\s\\S]*?(?=\\nfunction |$)'),body+'\n');
 for(const rel of ['pull.php','admin/deployment/panel.php']){const file=path.join(root,rel);let source=fs.readFileSync(file,'utf8');source=stub(source,'gh_api',`function gh_api(string $path,string $token): array {
  if(strpos($path,'/user/repos')===0)return [[['full_name'=>'fixture/repo','default_branch'=>'main']], ''];
