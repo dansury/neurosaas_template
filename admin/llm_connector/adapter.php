@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 /** Instance-based provider adapter with GenRouter compatibility. */
 final class LLM {
-    public const PROVIDERS = ['yandex', 'genrouter', 'openrouter'];
+    public const PROVIDERS = ['genrouter', 'openrouter', 'yandex'];
     private array $config;
     private $transport;
 
@@ -15,7 +15,7 @@ final class LLM {
 
     public static function defaults(): array {
         return [
-            'order' => ['yandex', 'genrouter', 'openrouter'],
+            'order' => ['genrouter', 'openrouter', 'yandex'],
             'yandex' => ['enabled' => false, 'key' => '', 'folder' => '', 'model' => 'yandexgpt/latest', 'route' => 'native', 'openai_base' => 'https://ai.api.cloud.yandex.net/v1', 'proxy' => ''],
             'genrouter' => ['enabled' => false, 'key' => '', 'model' => '', 'proxy' => ''],
             'openrouter' => ['enabled' => false, 'key' => '', 'model' => '', 'proxy' => ''],
@@ -142,7 +142,7 @@ final class LLM {
         $options = [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 60, CURLOPT_CONNECTTIMEOUT => 10,
             CURLOPT_HTTPHEADER => $headers, CURLOPT_CUSTOMREQUEST => $method, CURLOPT_FOLLOWLOCATION => false];
         if ($payload !== null) $options[CURLOPT_POSTFIELDS] = json_encode($payload, JSON_THROW_ON_ERROR);
-        if (($this->config[$provider]['proxy'] ?? '') !== '') $options[CURLOPT_PROXY] = $this->config[$provider]['proxy'];
+        if ($provider === 'openrouter' && ($this->config[$provider]['proxy'] ?? '') !== '') $options[CURLOPT_PROXY] = $this->config[$provider]['proxy'];
         curl_setopt_array($ch, $options);
         $body = curl_exec($ch);
         $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -151,3 +151,4 @@ final class LLM {
         return [$status, $body];
     }
 }
+

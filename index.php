@@ -9,8 +9,8 @@ header('Content-Type: text/html; charset=utf-8');
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
 body { margin: 0; background: #fff; color: #17243b; font: 18px/1.6 system-ui, sans-serif; }
-header { display: flex; justify-content: flex-end; padding: 24px; }
-a { color: #2357cc; text-underline-offset: 3px; }
+header { display: flex; justify-content: flex-start; padding: 24px; }
+a { color: #171717; text-underline-offset: 3px; }
 main { max-width: 820px; margin: 7vh auto; padding: 24px; }
 h1 { font-size: clamp(36px, 7vw, 64px); line-height: 1.1; }
 p { color: #54627b; }
@@ -23,4 +23,6 @@ p { color: #54627b; }
 Там можно настроить нейросети и почту, включить автообновление, нажать «Обновить» или заказать доработку.</p>
 <p>Расскажите AI-агенту, что должен делать сервис: для кого он нужен, какую задачу решает и какой результат вы хотите увидеть.
 Передайте агенту ссылку на свой репозиторий. Когда изменения появятся в GitHub, установите их из админки.</p></div>
-</main></body></html>
+</main><?php require_once __DIR__ . "/admin/llm_connector/feedback_widget.php"; neurosaas_feedback_widget("admin/?feedback=1"); ?>
+</body></html>
+

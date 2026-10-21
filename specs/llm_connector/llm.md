@@ -1,4 +1,4 @@
-# llm.php — LLM provider layer (OpenRouter + Yandex Cloud)
+# llm.php — LLM provider layer (GenRouter, OpenRouter, Yandex Cloud)
 
 `final class ToolkitLLM` — static, one instance per request. The legacy global `LLM` name is a conditional alias, created only when the host has not already declared that class. Internal module calls use `ToolkitLLM`, so a host's instance-based `LLM` can coexist without collisions. Two providers behind one
 interface, per-request model/provider override, config-driven fallback (newer version of
@@ -312,3 +312,14 @@ Statuses used: `ok`, `empty`, `no_content`, `exception`, `multi_fail`, `multi_no
 
 Run the offline fixtures in admin/llm_connector/tests through tests/run_all.sh. The root index.php is the public welcome page and is not a CLI utility.
 
+
+
+## GenRouter
+
+Provider-qualified genrouter:model identifiers retain their provider through
+active-model, candidate-chain, vision and fallback resolution. GenRouter sends
+Bearer credentials from GENROUTER_API_KEY to GENROUTER_BASE_URL/chat/completions;
+OpenRouter credentials and URLs are never borrowed. GenRouter joins the known
+provider order and uses GENROUTER_MODEL as its provider fallback. Model names and
+vision/audio capabilities come from the connected provider catalog. Existing
+saved preferences and the frozen host-facing API remain compatible.

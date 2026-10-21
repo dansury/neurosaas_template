@@ -171,7 +171,7 @@ echo 'warning fixture';
         expect(status == 403 and config() == before, "later connection requires CSRF")
         status, page = request(data=dict(csrf=token, action="connect_repository", repo="owner/repo", branch="main", gh_token="fixture-secret-key"))
         after = config()
-        expect(after["installation_mode"] == "github" and not after["auto_pull"] and after["password_hash"] == before["password_hash"] and after["admin_email"] == before["admin_email"], "later connection preserves account and does not auto-deploy")
+        expect(after["installation_mode"] == "github" and after["auto_pull"] and after["password_hash"] == before["password_hash"] and after["admin_email"] == before["admin_email"], "later connection preserves account and enables requested default updates")
         _, page = request("/admin/?feedback=1")
         token = csrf(page)
         ident, preview = snapshot(page)
@@ -194,8 +194,20 @@ echo 'warning fixture';
         expect("fixture-secret-key" not in sent, "GitHub key excluded from diagnostics")
         if fixture:
             subprocess.check_call([PHP, "-r", "$p=$argv[1];$c=require $p;$c['installation_mode']='local';$c['repo']='';$c['gh_token']='';file_put_contents($p,'<?php return '.var_export($c,true).';');", str(work / "pull-config.php")])
+        fresh = work / "fresh"
+        shutil.copytree(ROOT, fresh, ignore=shutil.ignore_patterns(".git", "data", "work", "__pycache__"))
+        fresh_client = browser()
+        status, page = request("/fresh/admin/?install=local", selected=fresh_client)
+        expect(status == 200 and 'name="password"' not in page, "fresh local setup asks no installation password")
+        status, page = request("/fresh/admin/", dict(csrf=csrf(page), installation_mode="local", timezone="Europe/Moscow"), selected=fresh_client)
+        expect(status == 200, "passwordless local setup saved")
+        status, page = request("/fresh/admin/", selected=fresh_client)
+        expect(status == 200 and "Создайте учётную запись" in page, "originating browser reaches account enrollment directly")
+        status, page = request("/fresh/admin/", selected=browser())
+        expect(status == 403, "another browser cannot claim pending installation")
         print(f"{checks} local installation and diagnostics checks passed")
     finally:
         server.terminate()
         server.wait(timeout=10)
         logs.close()
+

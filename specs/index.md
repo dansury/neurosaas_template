@@ -11,3 +11,6 @@ Read CLAUDE.MD, then this index, then the relevant module contract before source
 - [Toolkit integration](005-toolkit-parity/spec.md) and [capability verification](toolkit-parity.md).
 - [Russian onboarding](pull-panel-russian-onboarding.md).
 - [Clean starter and original attribution](006-clean-starter/spec.md): standalone installation, neutral white UI and maintained agent/module documentation.
+
+
+- [Operator workflows](008-operator-workflows/spec.md): token discovery, archive/computer updates, feedback media and GenRouter-first controls.

@@ -38,7 +38,7 @@ final class ModelCatalog {
     /** Minutes a cache counts as fresh (setting MODEL_CATALOG_TTL_MIN). */
     const TTL_MIN = 15;
     /** Cache size ceiling — the OpenRouter catalogue keeps growing. */
-    const MAX_MODELS = 500;
+    const MAX_MODELS = 1500;
 
     /* ─────────────────────────── reading the cache ─────────────────────────── */
 
@@ -124,19 +124,23 @@ final class ModelCatalog {
      */
     public static function refresh(array $cfg, SettingsStore $store): array {
         $rows = [];
-        $report = ['openrouter' => null, 'yandex' => null];
-        foreach (['openrouter' => 'fetchOpenRouter', 'yandex' => 'fetchYandex'] as $prov => $fn) {
+        $report = ['genrouter' => null, 'openrouter' => null, 'yandex' => null];
+        foreach (['genrouter' => 'fetchGenRouter', 'openrouter' => 'fetchOpenRouter', 'yandex' => 'fetchYandex'] as $prov => $fn) {
+            if ($prov === 'genrouter' && empty($cfg['GENROUTER_API_KEY'])) continue;
+            if ($prov === 'openrouter' && empty($cfg['OPENROUTER_API_KEY'])) continue;
+            if ($prov === 'yandex' && (empty($cfg['YANDEX_API_KEY']) || empty($cfg['YANDEX_FOLDER_ID']))) continue;
             try {
                 $got = self::$fn($cfg);
                 $report[$prov] = count($got);
                 $rows = array_merge($rows, $got);
             } catch (Throwable $e) {
                 $report[$prov] = $e->getMessage();
+                foreach (self::decode((string)($cfg[self::KEY_MODELS] ?? '')) as $cached) if (($cached['provider'] ?? '') === $prov) $rows[]=$cached;
             }
         }
         if (!$rows) {
             throw new RuntimeException(
-                'OpenRouter: ' . self::asText($report['openrouter']) . '; Yandex: ' . self::asText($report['yandex'])
+                'GenRouter: ' . self::asText($report['genrouter']) . '; OpenRouter: ' . self::asText($report['openrouter']) . '; Yandex: ' . self::asText($report['yandex'])
             );
         }
         if (count($rows) > self::MAX_MODELS) $rows = array_slice($rows, 0, self::MAX_MODELS);
@@ -228,24 +232,27 @@ final class ModelCatalog {
     /* ─────────────────────────── providers ─────────────────────────── */
 
     /** OpenRouter: GET /api/v1/models. The key is optional but sent when present. */
-    private static function fetchOpenRouter(array $cfg): array {
-        $url = (string) preg_replace('~/chat/completions$~', '/models', (string) ($cfg['OPENROUTER_URL'] ?? ''));
+    private static function fetchOpenRouter(array $cfg): array { return self::fetchRouter($cfg, 'openrouter'); }
+    private static function fetchGenRouter(array $cfg): array { return self::fetchRouter($cfg, 'genrouter'); }
+    private static function fetchRouter(array $cfg, string $provider): array {
+        $url = $provider === 'genrouter' ? rtrim((string)($cfg['GENROUTER_BASE_URL'] ?? 'https://api.genrouter.ru/v1'), '/') . '/models' : (string) preg_replace('~/chat/completions$~', '/models', (string) ($cfg['OPENROUTER_URL'] ?? ''));
+        $key = $provider === 'genrouter' ? 'GENROUTER_API_KEY' : 'OPENROUTER_API_KEY';
         if ($url === '') throw new RuntimeException('OPENROUTER_URL is empty');
         $headers = ['Accept: application/json'];
-        if (!empty($cfg['OPENROUTER_API_KEY'])) $headers[] = 'Authorization: Bearer ' . $cfg['OPENROUTER_API_KEY'];
+        if (!empty($cfg[$key])) $headers[] = 'Authorization: Bearer ' . $cfg[$key];
         $j = self::httpGetJson($url, $headers, $cfg);
         $rows = [];
         foreach ($j['data'] ?? [] as $m) {
             $slug = isset($m['id']) && is_string($m['id']) ? trim($m['id']) : '';
-            if ($slug === '' || strpos($slug, '/') === false) continue;
+            if ($slug === '' || ($provider === 'openrouter' && strpos($slug, '/') === false)) continue;
             $pin  = self::usdPerMillion($m['pricing']['prompt'] ?? null);
             $pout = self::usdPerMillion($m['pricing']['completion'] ?? null);
             $row = [
-                'id'            => 'or-' . self::shortId($slug),
+                'id'            => ($provider === 'genrouter' ? 'gr-' : 'or-') . self::shortId($slug),
                 'label'         => self::niceLabel($m['name'] ?? '', $slug),
-                'provider'      => 'openrouter',
+                'provider'      => $provider,
                 'full_id'       => $slug,
-                'group'         => 'OpenRouter · ' . self::vendorTitle($slug) . ' (каталог)',
+                'group'         => ($provider === 'genrouter' ? 'GenRouter · ' : 'OpenRouter · ') . self::vendorTitle($slug) . ' (каталог)',
                 // Pricing arrives in USD per token; the RUB estimates of the
                 // hardcoded rows are not invented here.
                 'price_in'      => 0.0,
@@ -254,6 +261,8 @@ final class ModelCatalog {
                 'price_usd_out' => $pout,
                 'context'       => (int) ($m['context_length'] ?? 0),
                 'vision'        => self::openRouterSeesImages($m),
+                'audio_transport' => ($m['type'] ?? '') === 'transcription' ? 'transcriptions' : 'chat',
+                'audio'         => in_array('audio', (array)($m['architecture']['input_modalities'] ?? $m['input_modalities'] ?? []), true) || ($m['type'] ?? '') === 'transcription',
                 'live'          => true,
             ];
             if ($pin === 0.0 && $pout === 0.0) $row['free'] = true;
@@ -499,3 +508,4 @@ final class ModelCatalog {
         return is_string($v) ? $v : (is_int($v) ? $v . ' models' : 'no data');
     }
 }
+

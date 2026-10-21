@@ -126,3 +126,14 @@ yields no match rather than a wrong one.
 - `setup.php` — `maybeRefresh()` on load, forced `refresh()` / `forget()` from the two
   buttons, and the cache status line (count, stamp, last error).
 - `llm.php` — `newerSiblings()` behind `LLM::autoFallbackRows()` (`spec/llm.md` §4).
+
+
+## GenRouter and optional providers
+
+Refresh queries only providers with configured credentials. GenRouter uses its
+own Bearer key and base URL/models; its short IDs start gr- and its model groups
+are distinct. Input modality metadata supplies vision/audio flags; transcription
+model types select the multipart transcription route, while chat audio models
+use input_audio. Unknown capabilities do not become verified defaults. Partial
+failures retain that provider's cached rows. A missing key or live account is
+not proof that a model is available. The cache ceiling is 1500 rows.
