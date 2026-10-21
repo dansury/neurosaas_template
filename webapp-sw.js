@@ -1,9 +1,10 @@
 'use strict';
-const CACHE = 'neurosaas-webapp-v1';
 const BASE = new URL('./', self.location.href);
+const PREFIX = 'neurosaas-webapp-' + encodeURIComponent(BASE.pathname) + '-';
+const CACHE = PREFIX + 'v1';
 const OFFLINE = new URL('admin/webapp/offline.html', BASE).href;
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(cache=>cache.add(OFFLINE)).then(()=>self.skipWaiting())); });
-self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('neurosaas-webapp-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())); });
+self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith(PREFIX)&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())); });
 self.addEventListener('fetch', event => {
   if (event.request.method==='GET' && event.request.mode==='navigate' && new URL(event.request.url).origin===BASE.origin) {
     event.respondWith(fetch(event.request).catch(()=>caches.match(OFFLINE)));

@@ -6,11 +6,11 @@ const html=execFileSync(process.env.PHP_BIN||'php',['-r',`function page_start($t
 
 async function workerChecks(){
   const handlers={},deleted=[],opened=[];let cached=[];
-  const context={URL,console,fetch:async()=>{throw Error('offline');},caches:{open:async()=>({add:async url=>cached.push(url)}),keys:async()=>['another-app','neurosaas-webapp-v0','neurosaas-webapp-v1'],delete:async key=>deleted.push(key),match:async url=>'offline:'+url},self:{location:{href:'https://fixture.test/nested/service/webapp-sw.js'},addEventListener:(name,fn)=>handlers[name]=fn,skipWaiting:()=>{},registration:{showNotification:async()=>{}},clients:{claim:async()=>{},matchAll:async()=>[],openWindow:async url=>opened.push(url)}}};
+  const context={URL,console,fetch:async()=>{throw Error('offline');},caches:{open:async()=>({add:async url=>cached.push(url)}),keys:async()=>['another-app','neurosaas-webapp-%2Fother%2F-v0','neurosaas-webapp-%2Fnested%2Fservice%2F-v0','neurosaas-webapp-%2Fnested%2Fservice%2F-v1'],delete:async key=>deleted.push(key),match:async url=>'offline:'+url},self:{location:{href:'https://fixture.test/nested/service/webapp-sw.js'},addEventListener:(name,fn)=>handlers[name]=fn,skipWaiting:()=>{},registration:{showNotification:async()=>{}},clients:{claim:async()=>{},matchAll:async()=>[],openWindow:async url=>opened.push(url)}}};
   vm.runInNewContext(fs.readFileSync('webapp-sw.js','utf8'),context);
   let pending;handlers.install({waitUntil:promise=>pending=promise});await pending;
   assert.deepEqual(cached,['https://fixture.test/nested/service/admin/webapp/offline.html']);
-  handlers.activate({waitUntil:promise=>pending=promise});await pending;assert.deepEqual(deleted,['neurosaas-webapp-v0']);
+  handlers.activate({waitUntil:promise=>pending=promise});await pending;assert.deepEqual(deleted,['neurosaas-webapp-%2Fnested%2Fservice%2F-v0']);
   let response;handlers.fetch({request:{method:'GET',mode:'navigate',url:'https://fixture.test/nested/service/admin/'},respondWith:promise=>response=promise});
   assert.match(await response,/offline/);
   response=null;handlers.fetch({request:{method:'GET',mode:'cors',url:'https://fixture.test/nested/service/api/private'},respondWith:promise=>response=promise});assert.equal(response,null,'no authenticated API caching');
@@ -47,6 +47,11 @@ async function workerChecks(){
       assert.equal(await page.evaluate(()=>workerScope),'/nested/service/');
       await page.getByRole('button',{name:'Установить приложение',exact:true}).click();
       assert.match(await page.locator('[data-webapp-status]').innerText(),/На экран Домой/);
+      await page.evaluate(()=>{window.installPrompts=0;const event=new Event('beforeinstallprompt');event.prompt=async()=>{++installPrompts;};event.userChoice=Promise.resolve({outcome:'accepted'});dispatchEvent(event);});
+      assert.equal(await page.evaluate(()=>installPrompts),0);
+      await page.locator('[data-webapp-install]').click();
+      assert.equal(await page.evaluate(()=>installPrompts),1,'native installation requires a click');
+      assert.match(await page.locator('[data-webapp-status]').innerText(),/установлено/);
       await page.locator('[data-webapp-subscribe]').click();
       await page.waitForFunction(()=>document.querySelector('[data-webapp-push-status]').textContent.includes('включены'));
       assert.equal(await page.evaluate(()=>permissionRequests),1);
