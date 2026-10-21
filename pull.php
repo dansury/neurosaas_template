@@ -1066,6 +1066,7 @@ function is_local_install(array $config): bool {
 }
 function render_local_setup(array $values, array $errors): void {
     page_start(ui('Files are already uploaded', 'Файлы уже загружены'));
+    render_workflow_diagram();
     echo '<p>' . ui('Use the same administration without GitHub downloads. Email verification is still required. AI, mail and sending issues need their own network connections.', 'Откройте ту же админку без скачивания с GitHub. Подтверждение email остаётся обязательным. Для AI, почты и отправки задач нужен доступ к соответствующим сервисам.') . '</p>';
     foreach ($errors as $error) echo '<p class="notice error">' . h(setup_error($error)) . '</p>';
     echo '<section><form method="post">' . csrf_field() . '<input type="hidden" name="installation_mode" value="local">';
@@ -1254,6 +1255,7 @@ function render_setup_form(array $values = [], array $errors = []): void {
         render_local_setup($values, $errors); return;
     }
     page_start(ui('Connect your GitHub repository', 'Подключите репозиторий GitHub'));
+    render_workflow_diagram();
     echo '<p>' . ui('This assistant copies your project to this server. Start with the repository and access key; each setting is explained below.', 'Этот помощник переносит проект на сервер. Начните с репозитория и ключа доступа — у каждого параметра есть пояснение.') . '</p>';
     foreach ($errors as $error) echo '<p class="notice error">' . h(setup_error($error)) . '</p>';
     if (local_upload_available()) echo '<section><h2>' . ui('Already uploaded all files?', 'Уже загрузили все файлы?') . '</h2><p>' . ui('Use the same administration without a repository or GitHub key.', 'Откройте ту же админку без репозитория и ключа GitHub.') . '</p><a class="button secondary" href="?install=local">' . ui('Files are already uploaded', 'Файлы уже загружены — настроить без GitHub') . '</a></section>';
@@ -1318,8 +1320,19 @@ function render_history_page(array $config): void {
     echo '</section><a href="?">' . ui('Back to panel', 'Вернуться в панель') . '</a>'; page_end();
 }
 function render_watch_page(array $config): void { render_dashboard($config); }
+/** Original owner-supplied workflow; standalone installers retain a remote fallback. */
+function render_workflow_diagram(): void {
+    $local = 'admin/deployment/workflow.png';
+    $src = is_file(PULL_ROOT . '/' . $local)
+        ? (defined('NEUROSAAS_ADMIN') ? '../' : '') . $local
+        : 'https://github.com/user-attachments/assets/d23f766f-42b6-494d-850f-00e0d38ee289';
+    $caption = ui('Request a change → GitHub Issues → run an AI agent and merge its PR → GitHub code → update the service through pull.php.', '«Заказать доработку» → GitHub Issues → запуск ИИ-агента и слияние PR → код на GitHub → обновление сервиса через pull.php.');
+    echo '<section class="workflow-diagram"><h2>' . ui('How improvements reach your service', 'Как доработки попадают в сервис') . '</h2><figure style="margin:0;padding:13px;background:#fff;color:#171717;min-width:0"><img src="' . h($src) . '" width="3228" height="1620" loading="lazy" decoding="async" style="display:block;width:100%;max-width:100%;height:auto" alt="' . h($caption) . '"><figcaption style="margin-top:13px;line-height:1.6">' . h($caption) . '</figcaption></figure></section>';
+}
+
 function render_dashboard(array $config, string $message = '', bool $error = false): void {
     page_start(ui('Administration', 'Управление сервисом'));
+    render_workflow_diagram();
     echo '<p><a href="?webapp=1">Приложение и уведомления</a></p>';
     echo '<p><a href="?diagnostics=1">' . ui('Local diagnostics', 'Локальная диагностика') . '</a></p>';
     if (is_local_install($config)) echo '<p class="notice">' . ui('Local installation: files uploaded manually. GitHub checks are off.', 'Локальная установка: файлы загружены вручную. Проверки GitHub выключены.') . '</p>';
