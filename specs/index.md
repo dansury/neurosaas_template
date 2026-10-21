@@ -1,5 +1,7 @@
 # NeuroSaaS specifications
 
+- [Installable application and notifications](010-webapp/spec.md): reusable PWA, private owner-device subscriptions and dependency-free Web Push.
+
 - [Feedback dictation](009-feedback-dictation/spec.md): readable transcripts, protected facts and recoverable provider errors.
 
 Read CLAUDE.MD, then this index, then the relevant module contract before source code.

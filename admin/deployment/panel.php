@@ -139,6 +139,12 @@ if ($config['password_hash'] !== '') {
 
 if (defined('NEUROSAAS_ADMIN')) {
     \NeuroSaaS\AdminAccount::gate($configPath);
+        if (isset($_GET['webapp'])) {
+            if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['password'])) { header('Location: ?webapp=1', true, 303); exit; }
+            require_once PULL_ROOT . '/admin/webapp/controller.php';
+            \NeuroSaaS\webapp_admin((string)$_SESSION['pull_csrf'], (string)($config['admin_email'] ?? ''));
+            exit;
+        }
 }
 if (isset($_GET['toolkit'])) {
     // Never let the standalone module interpret the login POST as a settings save.
@@ -1314,6 +1320,7 @@ function render_history_page(array $config): void {
 function render_watch_page(array $config): void { render_dashboard($config); }
 function render_dashboard(array $config, string $message = '', bool $error = false): void {
     page_start(ui('Administration', 'Управление сервисом'));
+    echo '<p><a href="?webapp=1">Приложение и уведомления</a></p>';
     echo '<p><a href="?diagnostics=1">' . ui('Local diagnostics', 'Локальная диагностика') . '</a></p>';
     if (is_local_install($config)) echo '<p class="notice">' . ui('Local installation: files uploaded manually. GitHub checks are off.', 'Локальная установка: файлы загружены вручную. Проверки GitHub выключены.') . '</p>';
     if (!is_local_install($config)) echo '<p>' . h($config['repo']) . ' · ' . h($config['source'] === 'pr' ? 'PR #' . $config['pr_number'] : $config['branch']) . '</p>';

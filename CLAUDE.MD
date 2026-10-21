@@ -46,3 +46,12 @@ All spec and code in English, interface - in the user's language.
 If you don’t have time to complete some tasks during this pass, write them down in TODO.md.
 Before reading the spec, check TODO.md and complete those tasks first.
 After passing the feature test, remove the completed tasks from TODO.md; leave the uncompleted ones.
+
+# Installable application module
+Reuse `admin/webapp/WebApp.php` for PWA installation and owner-device Web Push.
+Keep `WebApp::head()` inside the generated page's head (pass the service base
+path for nested routers), root `webapp-sw.js`, and the existing authenticated
+`admin/?webapp=1` controls. Read `admin/webapp/README.md` and
+`specs/010-webapp/spec.md` before changing this module. Notification events are
+explicit server-side integrations; never copy sales events or credentials from
+kp-atlant. Preserve `admin/account/data/webapp.sqlite` with other account data.
