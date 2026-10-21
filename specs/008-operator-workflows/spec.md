@@ -47,6 +47,10 @@ data, dependency setup and one-minute foreground polling. Python download guidan
 is in its header and README, since a script cannot execute without its interpreter.
 
 ## Verification
+Feedback dictation formatting and fact preservation are specified in
+[Feedback dictation](../009-feedback-dictation/spec.md). Recognized text survives
+formatting failures and the interface displays the warning without submitting it.
+
 Use offline HTTP and provider fixtures, malicious ZIP and rollback tests, Python
 updater fixtures and desktop/mobile browser checks. Never send real feedback,
 email, paid inference or screenshots during tests. Live capabilities that cannot

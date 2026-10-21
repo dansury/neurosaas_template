@@ -1,5 +1,7 @@
 # NeuroSaaS specifications
 
+- [Feedback dictation](009-feedback-dictation/spec.md): readable transcripts, protected facts and recoverable provider errors.
+
 Read CLAUDE.MD, then this index, then the relevant module contract before source code.
 
 - [Local installation and feedback diagnostics](007-local-diagnostics/spec.md): full-archive setup without GitHub, the shared panel, local errors and consented feedback snapshots. [Plan](007-local-diagnostics/plan.md), [tasks](007-local-diagnostics/tasks.md).

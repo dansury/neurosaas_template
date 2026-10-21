@@ -18,6 +18,7 @@ jobs:
       - run: php tests/toolkit.php
       - run: php tests/diagnostics.php
       - run: php tests/operator_workflows.php
+      - run: php tests/feedback_speech.php
       - run: python3 tests/pull_python.py
       - run: for file in admin/llm_connector/tests/*.php; do php "$file" || exit 1; done
       - run: python3 tests/http_test.py
