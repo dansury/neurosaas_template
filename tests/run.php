@@ -18,7 +18,7 @@ expect($GLOBALS['pull_language'] === 'en', 'manual override');
 $_SESSION = []; $_GET = []; $_SERVER['GEOIP_COUNTRY_CODE'] = ''; $_SERVER['HTTP_CF_IPCOUNTRY'] = 'RU'; init_panel();
 expect($GLOBALS['pull_language'] === 'ru', 'untrusted country header ignored');
 parse_str((string)parse_url(pat_url('owner/repo', true), PHP_URL_QUERY), $permissions);
-expect($permissions['contents'] === 'read' && $permissions['issues'] === 'write' && $permissions['pull_requests'] === 'read', 'token permissions');
+expect($permissions['contents'] === 'write' && $permissions['issues'] === 'write' && $permissions['pull_requests'] === 'read', 'token permissions');
 $hash = password_hash('example', PASSWORD_DEFAULT);
 expect(auth_token_valid(auth_token($hash, time() + 60), $hash), 'valid signed auth');
 expect(!auth_token_valid(auth_token($hash, time() - 60), $hash), 'expired auth');
@@ -39,6 +39,7 @@ expect($url === 'https://gateway.example/v1/chat/completions', 'custom OpenAI-co
 [$url] = $adapter->request('genrouter', [], false); expect($url === 'https://api.genrouter.ru/v1/chat/completions', 'GenRouter endpoint matches upstream');
 
 $calls = [];
+$cfg['order'] = ['yandex','genrouter','openrouter'];
 $cfg['yandex']['route'] = 'native';
 $llm = new LLM($cfg, static function ($method, $url, $headers, $payload, $provider) use (&$calls) {
     $calls[] = $provider;
@@ -47,7 +48,7 @@ $llm = new LLM($cfg, static function ($method, $url, $headers, $payload, $provid
 });
 expect($llm->chatJson('system', 'user') === ['ok' => true], 'JSON fallback result');
 expect($calls === ['yandex', 'yandex', 'genrouter'], 'bounded retry then fallback');
-$cfg['yandex']['enabled'] = false; $calls = [];
+$cfg['yandex']['enabled'] = false; $cfg['order']=['genrouter','openrouter','yandex']; $calls = [];
 $llm = new LLM($cfg, static function ($method, $url, $headers, $payload, $provider) use (&$calls) {
     $calls[] = $provider;
     return [200, json_encode(['choices' => [['message' => ['content' => $provider === 'genrouter' ? '{"broken":' : '{"safe":true}']]]])];
@@ -99,3 +100,4 @@ expect(file_get_contents($dir . '/dst/index.php') === 'new' && !file_exists($dir
 foreach (ALWAYS_KEEP as $file) expect(file_get_contents($dir . '/dst/' . $file) === 'local', 'preserved ' . $file);
 cleanup($dir);
 echo "$checks checks passed\n";
+

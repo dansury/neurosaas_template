@@ -1,64 +1,79 @@
-# `pull.php`: установка и обновление на хостинге
+# Standalone installer and version management
 
-## Назначение
+`pull.php` is a self-contained uploadable deployment entry point. Its engine is
+identical to `admin/deployment/panel.php` except PULL_ROOT. A minimal PHP bootstrap
+checks the runtime before evaluating PHP 7.4+ engine syntax, so an older handler
+shows its version and requirements rather than a parser failure. PHP must be
+configured on the host. Zip and cURL (or allow_url_fopen) and a writable target are
+required; the advanced toolkit additionally needs PDO SQLite, DOM and mbstring.
+Apache 2.4+ is relevant to .htaccess deny rules; nginx needs equivalent rules.
 
-`pull.php` — единственный файл, который администратор вручную загружает в папку сервиса на PHP-хостинге. Он подключает GitHub-репозиторий, скачивает выбранную версию и помещает код в ту же папку. Остальные файлы проекта поступают из GitHub при первой установке и при последующих обновлениях.
+## Setup and authentication
 
-Файл обслуживает шаблонный репозиторий и созданные из него самостоятельные репозитории. В качестве источника задаются `owner/repository`, ветка или pull request и, при необходимости, подкаталог проекта.
+A single-file upload offers GitHub setup. A complete archive also offers local
+setup with no repository or token. Neither requires a second installation
+password: the pending configuration is tied to the initiating browser session.
+Verified administration enrollment supplies its actual password and email-code
+flow. Existing installation passwords, accounts and secrets remain valid. A
+lost pending session requires removing pull-config.php through hosting controls
+and restarting setup. Browser mutations require CSRF; credentials stay server-side.
 
-## Первый запуск
+Token creation precedes fields and requests Contents write for screenshots,
+Issues write and Pull requests read. Pasting the user token loads accessible
+repositories and then branches over POST; main is selected when available.
+GitHub credentials never appear in URLs or JSON responses. The token's user is
+the author of submitted issues. Local mode performs no GitHub operation until
+connected; a new connection enables the requested automatic-update default.
 
-Full-archive installations may choose local mode when index.php, admin/index.php and the toolkit exist. This uses the same panel and verified-account gate without a repository or GitHub key. Local status/history explain that updates are manual; GitHub operations are rejected before network access. A later authenticated connection preserves all other local configuration. A single uploaded pull.php still uses GitHub installation. See 007-local-diagnostics/spec.md.
+## Exact versions and rollback
 
-1. При отсутствии `pull-config.php` GET-запрос показывает форму настройки, а POST с корректными данными создаёт конфигурацию на сервере.
-2. Администратор указывает репозиторий, ветку, подкаталог, часовой пояс, список дополнительно сохраняемых путей, опцию удаления лишних файлов и пароль панели.
-3. GitHub token хранится в серверном `pull-config.php`; переменная окружения `GITHUB_TOKEN` имеет приоритет над сохранённым значением.
-4. После настройки первая явная установка получает точный SHA источника, скачивает ZIP-архив GitHub, распаковывает его во временную папку и копирует выбранный каталог в папку `pull.php`.
+GitHub refs resolve to an exact commit before download and extraction. Deploys
+share a nonblocking pull-deploy.lock, validate all ZIP paths/symlinks/size limits,
+copy files atomically and preserve local settings/data. Failed resolution or
+extraction performs no live-file copy or purge. State holds twenty successful
+versions and available associated PR summaries. Only a recorded version may be
+restored. Rollback pins automatic updates until an explicit GitHub deployment.
+The UI explains restoring the desired files with a new commit/PR into main,
+preserving history rather than changing the default branch or force-pushing.
 
-Для приватного репозитория token должен давать доступ к содержимому репозитория. Встроенная обратная связь требует право GitHub Issues на запись; просмотр preview pull request требует доступ к pull requests.
+ZIP uploads use the same lock, path validation, atomic copy and preservation
+rules. A root index.php/index.html or one enclosing project folder is supported.
+The prior manual installation is snapshotted before its first archive update.
+Archives are private PHP envelopes, keyed by their content hash and included in
+normal history. Archive hashes are not represented as Git commits. Local-mode
+archive history works without GitHub access. A visible progress/result surface
+accompanies technical output; secrets are not progress messages.
 
-## Обновление и целостность
+Preserved paths include pull.php/config/state/lock, ai-config.php, .git, .env,
+config.php, data, storage, pull-archives, account state and current/legacy module
+settings/data/credentials. Operator keep paths are added. Optional purge runs
+only after successful extraction/copy. Administration atomically keeps the
+preserved standalone installer consistent with its bundled engine.
 
-- Ручная установка запускается только POST-действием из панели с CSRF-защитой. Обычный GET открывает панель и ничего не разворачивает.
-- Перед копированием источник разрешается в конкретный коммит; архив скачивается для этого SHA. Неразрешимый источник, ошибка сети, ZIP или распаковки завершают запрос без удаления файлов назначения.
-- Процессы развёртывания сериализуются `pull-deploy.lock`. Параллельная попытка получает HTTP 409.
-- Состояние последней версии и история хранятся в `pull-state.json`; история содержит до 20 развёрнутых версий. Откат возможен только к версии, которая уже была успешно установлена этим экземпляром.
-- Откат приостанавливает автоматические обновления, пока администратор явно не установит актуальную версию.
-- Опция purge удаляет после успешного копирования файлы, отсутствующие в выбранном каталоге репозитория. Она необратима и не применяется при неудачной загрузке.
+## Routes
 
-Следующие пути всегда сохраняются при установке и purge: `pull.php`, `pull-config.php`, `pull-state.json`, `pull-deploy.lock`, `ai-config.php`. Дополнительные пути задаёт администратор при настройке.
+GET opens management; installed browser routes redirect to admin. The exact GET
+check/plain pair remains the cron exception. Status/history/watch are read-only;
+deploy, archive, rollback, preferences, feedback and account changes require POST
+and CSRF. Cron passes a configured password in X-Pull-Password, never in a URL.
+New GitHub setups default automatic checks on while the panel is open; legacy
+saved off choices remain off. Local mode has no GitHub checks. Foreground checks
+stop with the browser; a cron job is needed without an open browser.
 
-## Доступ и интерфейсы
+## Computer updater
 
-| Запрос | Результат |
-| --- | --- |
-| `GET /pull.php` | Панель управления без изменения файлов. |
-| `POST /pull.php` | Настройка, ручная установка, сохранение настроек или откат; требует CSRF и, если задан, пароль. |
-| `GET /pull.php?status=1` | JSON со статусом установленной и отслеживаемой версии. |
-| `GET /pull.php?history=1` | История версий и доступные действия отката. |
-| `GET /pull.php?check=1&plain=1` | Проверка источника и установка только при новом коммите; предназначено для cron. |
-| `GET /pull.php?watch=1` | Страница отслеживания обновлений. |
-| `GET /pull.php?feedback=1` | Отдельная форма обратной связи, если панель уже настроена. |
+pull.py uses Python 3.9+ stdlib for token-assisted repository/branch selection,
+exact-commit ZIP downloads, safe extraction, atomic copies, preserved data,
+dependency installation and one-minute foreground polling. --once and --no-deps
+bound work; --rollback restores a downloaded commit and pauses polling. pull.cmd
+and pull.sh explain where to get Python when absent. Dependencies may require
+Node/npm, PHP/Composer or a Python virtual environment according to project files.
 
-`?plain=1` предоставляет текстовый вывод для интеграций. `?status=1`, `?history=1` и `?watch=1` не изменяют код. Разрешённый список IP берётся из `KRASKI_PULL_ALLOW_IPS`; пустое значение не ограничивает доступ.
+## Verification
 
-## Аутентификация и секреты
-
-- Пароль панели хранится только в виде хеша. Сессия без запоминания действует до 12 часов, cookie «запомнить» — до 30 дней.
-- Cron передаёт пароль только заголовком `X-Pull-Password`; пароль не передаётся в URL.
-- Все изменяющие браузерные POST-запросы требуют CSRF-токен. URL GitHub и данные форм экранируются при отображении.
-- Конфигурация и AI-ключи сохраняются на сервере с правами `0600`, не возвращаются в браузер и исключены из Git.
-
-## Автоматическая проверка
-
-Панель хранит включённость автоматической проверки и интервал от 15 до 86 400 секунд. Пока панель открыта, она проверяет статус и устанавливает новый коммит только при включённой автоматизации. Для работы без браузера оператор настраивает cron, который обращается к `?check=1&plain=1` с заголовком пароля.
-
-Ошибки проверки не должны начинать развёртывание. Автоматический режим не отменяет ручную проверку после важного обновления: администратор может открыть `pull.php` и увидеть журнал операции.
-
-## Вложенные данные модуля
-
-`admin/llm_connector/data`, `.env`, `.htaccess` и `selfheal/token.local.php` сохраняются при копировании и purge. Защита передаётся рекурсивно по относительным путям. Если директория исходника исчезла, директория назначения с защищёнными потомками не удаляется. При первой инициализации модуль создаёт закрывающий прямой HTTP-доступ `.htaccess`, если его ещё нет.
-
-## Проверка реализации
-
-Базовый `pull.php` совместим с PHP 7.4+ и использует cURL с безопасным fallback на `allow_url_fopen`; расширенный toolkit имеет собственные требования. Минимальная проверка включает PHP lint и изолированные HTTP-тесты настройки, аутентификации, CSRF, локализации, проверки источника, сохранения файлов и rollback. Тесты используют подменённые GitHub-ответы: они не скачивают приватный код, не создают GitHub Issues и не выполняют платные AI-запросы.
+PHP 8.1/8.3 offline suites cover authentication, CSRF, account migration, provider
+payloads, local diagnostics and consent, setup and rollback. Operator tests add
+ZIP traversal rejection and GenRouter isolation. Browser acceptance uses a
+private disposable PHP installation for desktop/mobile setup, movable feedback,
+provider controls, a real ZIP upload and restoration of the prior installation.
+No live issues, email or paid inference are sent in tests.

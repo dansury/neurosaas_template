@@ -1,4 +1,12 @@
 <?php
+// Parse-safe bootstrap: older PHP versions must report requirements, not a syntax error.
+if (PHP_VERSION_ID < 70400) {
+    if (!headers_sent()) http_response_code(503);
+    echo '<!doctype html><meta charset="utf-8"><h1>Обновите PHP на хостинге</h1><p>Требуется PHP 7.4 или новее; рекомендуется 8.1+. Сейчас: ' . htmlspecialchars(PHP_VERSION, ENT_QUOTES, 'UTF-8') . '</p><p>Сервер: ' . htmlspecialchars(isset($_SERVER['SERVER_SOFTWARE']) ? $_SERVER['SERVER_SOFTWARE'] : 'версия не раскрывается', ENT_QUOTES, 'UTF-8') . '</p><p>Попросите хостинг переключить PHP и включить zip и cURL. Для .htaccess нужен Apache 2.4+, для nginx — аналогичные запреты доступа.</p>';
+    exit;
+}
+$neurosaas_engine = <<<'NEUROSAAS_ENGINE_20'
+<?php
 // NeuroSaaS deployment and service control panel.
 // Pulls a subdirectory from a GitHub repo and overwrites the directory this file lives in.
 // Configuration lives in ./pull-config.php (next to this file). Delete pull-config.php to re-run setup.
@@ -26,7 +34,7 @@ if (!defined('PULL_ROOT')) define('PULL_ROOT', __DIR__);
 
 const CONFIG_FILE = 'pull-config.php';
 const STATE_FILE  = 'pull-state.json';
-const ALWAYS_KEEP = ["pull.php","pull-config.php","pull-state.json","pull-deploy.lock","ai-config.php","admin/account/data","admin/llm_connector/data","admin/llm_connector/.env","admin/llm_connector/.htaccess","admin/llm_connector/selfheal/token.local.php","modules/site_yacloud_openrouter/data","modules/site_yacloud_openrouter/.env","modules/site_yacloud_openrouter/.htaccess","modules/site_yacloud_openrouter/selfheal/token.local.php"];
+const ALWAYS_KEEP = ["pull.php","pull-config.php","pull-state.json","pull-deploy.lock","ai-config.php","admin/feedback/data","pull-archives","data","storage",".env","config.php",".git","admin/account/data","admin/llm_connector/data","admin/llm_connector/.env","admin/llm_connector/.htaccess","admin/llm_connector/selfheal/token.local.php","modules/site_yacloud_openrouter/data","modules/site_yacloud_openrouter/.env","modules/site_yacloud_openrouter/.htaccess","modules/site_yacloud_openrouter/selfheal/token.local.php"];
 
 // Prefilled fine-grained token form: everything but the repository picker can be
 // set from the URL. See docs.github.com -> "Pre-filling personal access token details".
@@ -44,6 +52,18 @@ const AUTH_REMEMBER_TTL = 2592000; // "remember me" cookie lifetime: 30 days
 const AUTH_SESSION_TTL  = 43200;   // without "remember me": 12 hours, session cookie
 
 if (defined('PULL_LIBRARY_ONLY')) return;
+if (!defined('PULL_SKIP_PREFLIGHT')) {
+    $missing = [];
+    if (PHP_VERSION_ID < 70400) $missing[] = 'PHP 7.4+';
+    if (!class_exists('ZipArchive')) $missing[] = 'PHP extension zip';
+    if (!function_exists('curl_init') && !ini_get('allow_url_fopen')) $missing[] = 'cURL or allow_url_fopen';
+    if (!is_writable(PULL_ROOT)) $missing[] = 'write permission for the installation directory';
+    if ($missing) {
+        http_response_code(503);
+        echo '<!doctype html><meta charset="utf-8"><h1>Требования к хостингу</h1><p>Попросите хостинг включить: ' . htmlspecialchars(implode(', ', $missing), ENT_QUOTES, 'UTF-8') . '</p><p>PHP: ' . htmlspecialchars(PHP_VERSION, ENT_QUOTES, 'UTF-8') . '; сервер: ' . htmlspecialchars((string)($_SERVER['SERVER_SOFTWARE'] ?? 'не раскрывает версию'), ENT_QUOTES, 'UTF-8') . '</p><p>Рекомендуется PHP 8.1+. Apache 2.4+ нужен только для правил .htaccess; nginx поддерживается при аналогичном запрете доступа к данным.</p>';
+        exit;
+    }
+}
 // Once installed, all interactive controls are mounted under admin/.
 if (!defined('NEUROSAAS_ADMIN') && is_file(PULL_ROOT . '/admin/index.php')
     && !(($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET'
@@ -65,6 +85,8 @@ $plain      = isset($_GET['plain']);
 
 // First-run setup: render form (GET) or write config (POST)
 if (!file_exists($configPath)) {
+    if (isset($_GET['feedback'])) { $config=['repo'=>'']; render_feedback(($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' ? 'Сначала установите сервис и подключите GitHub, затем отправьте идею.' : '', ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST'); exit; }
+    if (in_array($_POST['action'] ?? '', ['github_repositories','github_branches'], true)) { repository_discovery(''); exit; }
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         handle_setup_post($configPath);
     } else {
@@ -74,6 +96,7 @@ if (!file_exists($configPath)) {
 }
 
 $config = load_config($configPath);
+if ($config['password_hash'] === '' && $config['bootstrap_session'] !== '' && !hash_equals($config['bootstrap_session'], hash('sha256', session_id()))) { http_response_code(403); exit('Продолжите установку в браузере, в котором вы её начали. Если доступ потерян, удалите pull-config.php на хостинге и начните заново.'); }
 date_default_timezone_set($config['timezone'] ?: 'UTC');
 
 ignore_user_abort(true);
@@ -135,6 +158,8 @@ if (isset($_GET['toolkit'])) {
 
 $ghToken = (string)(getenv('GITHUB_TOKEN') ?: $config['gh_token']);
 $action = (string)($_POST['action'] ?? '');
+if (in_array($action, ['github_repositories','github_branches'], true)) { repository_discovery($ghToken); exit; }
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['rollback_archive'])) { archive_deploy($config); exit; }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action !== '' && $action !== 'deploy') {
     handle_panel_post($config, $ghToken);
     exit;
@@ -154,6 +179,7 @@ if (is_local_install($config)) {
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(['ok' => true, 'mode' => 'local', 'auto' => false, 'changed' => false, 'sha' => '', 'deployed' => '']); exit;
     }
+    if (isset($_GET['history']) && !empty(state_read()['sha'])) { render_history_page($config); exit; }
     if (isset($_GET['history'])) { page_start(ui('Version history', 'История версий')); echo '<section><p>' . ui('Files were uploaded manually. No GitHub deployment history exists yet.', 'Файлы загружены вручную. Истории установок из GitHub пока нет.') . '</p><a href="?">← ' . ui('Back to panel', 'Вернуться в панель') . '</a></section>'; page_end(); exit; }
     http_response_code(409);
     if ($plain) { header('Content-Type: text/plain; charset=utf-8'); exit("STATUS: ERROR\nLocal installation: connect GitHub in administration before deploying.\n"); }
@@ -321,6 +347,7 @@ if ($zip->open($zipFile) !== true) {
     end_output();
     exit;
 }
+try { validate_archive($zip); } catch (Throwable $e) { $zip->close(); cleanup($tmp); http_response_code(422); term($e->getMessage()); end_output(); exit; }
 if (!$zip->extractTo($tmp)) {
     $zip->close();
     cleanup($tmp);
@@ -373,7 +400,13 @@ cleanup($tmp); // only now — purge compares the target against $src
 
 // Remember what is live and append to the deploy log: that is what the next
 // ?check=1 compares against, and what a rollback can later reach back to.
+$prSummary = '';
+if (!$isRollback && $track['sha'] !== '') {
+    [$prs,$ignored] = gh_api('/repos/' . $config['repo'] . '/commits/' . $track['sha'] . '/pulls', $ghToken);
+    foreach ((array)$prs as $pr) if (is_array($pr)) $prSummary .= '#' . (int)($pr['number'] ?? 0) . ' ' . (string)($pr['title'] ?? '') . "\n";
+}
 state_record_deploy([
+    'pr_summary' => $isRollback ? ($track['from']['pr_summary'] ?? '') : trim($prSummary),
     'sha'      => $track['sha'],
     'ref'      => $track['ref'],
     'mode'     => $isRollback ? (string)($track['from']['mode'] ?? 'rollback') : $track['mode'],
@@ -456,6 +489,7 @@ function load_config(string $path): array {
         // Both default to "off" when the key is missing, so a config written by an
         // older version keeps working and never starts deleting files by surprise.
         'password_hash' => (string)($raw['password_hash'] ?? ''),
+        'bootstrap_session' => (string)($raw['bootstrap_session'] ?? ''),
         'purge'         => (bool)($raw['purge'] ?? false),
         // Tracking. A config written before tracking existed has no 'source' key,
         // so it keeps behaving exactly as it did: plain branch deploys, no auto-pull.
@@ -698,11 +732,11 @@ function pat_url(string $repo, bool $needsPullRequests): string {
         'description' => 'Deploy and feedback token for pull.php. Under "Repository access" pick '
                        . ($repo !== '' ? $repo : 'the repository to deploy') . '.',
         'expires_in'  => 'none',
-        'contents'    => 'read',
+        'contents'    => 'write',
         'issues'      => 'write',
         'metadata'    => 'read',
     ];
-    if ($needsPullRequests) $params['pull_requests'] = 'read';
+    $params['pull_requests'] = 'read';
     if ($owner !== '')      $params['target_name']   = $owner;
     return PAT_NEW_URL . '?' . http_build_query($params);
 }
@@ -1029,16 +1063,14 @@ function render_local_setup(array $values, array $errors): void {
     echo '<p>' . ui('Use the same administration without GitHub downloads. Email verification is still required. AI, mail and sending issues need their own network connections.', 'Откройте ту же админку без скачивания с GitHub. Подтверждение email остаётся обязательным. Для AI, почты и отправки задач нужен доступ к соответствующим сервисам.') . '</p>';
     foreach ($errors as $error) echo '<p class="notice error">' . h(setup_error($error)) . '</p>';
     echo '<section><form method="post">' . csrf_field() . '<input type="hidden" name="installation_mode" value="local">';
-    field('password', ui('Installation password', 'Пароль установки'), '', ui('At least 12 characters. Next: sign in and verify your email.', 'Не менее 12 символов. Далее войдите и подтвердите email.'), 'password');
+    echo '<p>Дополнительный пароль установки не нужен. Далее создайте учётную запись администратора и подтвердите email.</p>';
     field('timezone', ui('Time zone', 'Часовой пояс'), $values['timezone'] ?? 'Europe/Moscow');
     echo '<button>' . ui('Open administration', 'Перейти к настройке админки') . '</button></form><p><a href="?">' . ui('Install from GitHub instead', 'Установка из GitHub') . '</a></p></section>';
     page_end();
 }
 function render_repository_connection(): void {
     echo '<section id="repository"><h2>' . ui('Connect GitHub later', 'Подключить GitHub') . '</h2><p>' . ui('Optional: enable repository updates and feedback. Local account and settings are preserved. Connecting does not install a version.', 'Необязательно: включите обновления из репозитория и отправку идей. Учётная запись и настройки сохранятся. Подключение само по себе не устанавливает версию.') . '</p><details><summary>' . ui('Configure connection', 'Настроить подключение') . '</summary><form method="post">' . csrf_field() . '<input type="hidden" name="action" value="connect_repository">';
-    field('repo', ui('Your repository', 'Ваш репозиторий'), '', 'owner/name');
-    field('branch', ui('Branch', 'Ветка'), 'main');
-    field('gh_token', ui('GitHub access key', 'Ключ доступа GitHub'), '', ui('Contents: Read; Issues: Read and write. No connection test runs when saving.', 'Contents: Read; Issues: Read and write. Сохранение не запускает проверку подключения.'), 'password');
+    repository_fields([]);
     echo '<button>' . ui('Save connection', 'Сохранить подключение') . '</button></form></details></section>';
 }
 function diagnostic_snapshot(): string {
@@ -1067,7 +1099,7 @@ function handle_setup_post(string $configPath): void {
     $intRaw   = trim((string)($_POST['auto_interval'] ?? ''));
 
     $errors = [];
-    if (strlen($password) < ($local ? 12 : 6) || ($local && strlen($password) > 512)) {
+    if ($password !== '' && strlen($password) < 6) {
         $errors[] = $local ? ui('Use a password of 12–512 characters.', 'Используйте пароль от 12 до 512 символов.') : 'password must be at least 6 characters';
     }
     $prNumber = (int)$prRaw;
@@ -1124,6 +1156,7 @@ function handle_setup_post(string $configPath): void {
         'keep_files'    => $keepFiles,
         'timezone'      => $timezone,
         'password_hash' => $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : '',
+        'bootstrap_session' => $password === '' ? hash('sha256',session_id()) : '',
         'purge'         => !$local && $purge,
         'source'        => $local ? 'branch' : $source,
         'pr_number'     => $local ? 0 : $prNumber,
@@ -1178,17 +1211,18 @@ function check_csrf(): void {
 function page_start(string $title): void {
     header('Content-Type: text/html; charset=utf-8'); header('Cache-Control: no-store');
     header('Referrer-Policy: same-origin'); header('X-Content-Type-Options: nosniff');
-    echo '<!doctype html><html lang="' . h($GLOBALS['pull_language']) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>' . h($title) . '</title>' . terminal_css() . '</head><body><main><header><a class="brand" href="?">' . ui('Your service', 'Ваш сервис') . ' <small>' . ui('control panel', 'панель управления') . '</small></a><nav><a href="?lang=ru">Русский</a> · <a href="?lang=en">English</a> · <a href="' . (defined('NEUROSAAS_ADMIN') ? '../' : './') . '">' . ui('Open service', 'Открыть сервис') . '</a></nav></header><h1>' . h($title) . '</h1>';
+    echo '<!doctype html><html lang="' . h($GLOBALS['pull_language']) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>' . h($title) . '</title>' . terminal_css() . '</head><body><main><header><a class="brand" href="?">' . ui('Your service', 'Ваш сервис') . ' <small>' . ui('control panel', 'панель управления') . '</small></a><nav><a href="?feedback=1">Заказать доработку</a> · <a href="?lang=ru">Русский</a> · <a href="?lang=en">English</a> · <a href="' . (defined('NEUROSAAS_ADMIN') ? '../' : './') . '">' . ui('Open service', 'Открыть сервис') . '</a></nav></header><h1>' . h($title) . '</h1>';
 }
 function page_end(): void {
+    feedback_dialog();
     echo '<footer>' . ui('Need advice or a custom improvement?', 'Нужна консультация или доработка?') . ' <a href="https://dansury.github.io" target="_blank" rel="noopener">dansury.github.io</a> · <a href="https://t.me/dansury.vj" target="_blank" rel="noopener">Telegram: dansury.vj</a></footer></main></body></html>';
 }
 function terminal_css(): string {
     return <<<'CSS'
 <style>
-:root{color-scheme:light;--ink:#17243b;--muted:#56657a;--accent:#2357cc;--border:#d9e1ed}
-*{box-sizing:border-box}body{margin:0;background:#fff;color:var(--ink);font:16px/1.6 system-ui,-apple-system,sans-serif}main{max-width:1040px;margin:auto;padding:28px 22px}header{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:38px}.brand{font-size:23px;font-weight:750;text-decoration:none}.brand small{display:block;color:var(--muted);font-size:12px;font-weight:500}a{color:var(--accent)}nav{font-size:14px}h1{font-size:32px;line-height:1.2}h2{font-size:22px;margin-top:0}h3{font-size:18px}section,.card{background:white;border:1px solid var(--border);border-radius:16px;padding:26px;margin:20px 0;box-shadow:0 5px 20px #1b355507}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.grid section{margin:0}p,.help{color:var(--muted)}label{display:block;font-weight:600;margin:16px 0 4px}label.check{display:flex;align-items:flex-start;gap:10px;font-weight:500}input:not([type=checkbox]),textarea,select{font:inherit;width:100%;padding:10px 12px;border:1px solid #bcc9dc;border-radius:8px;background:white;color:var(--ink)}input[type=checkbox]{width:18px;height:18px;margin-top:4px}input:focus,textarea:focus,select:focus{outline:3px solid #b5cdfc;outline-offset:1px}.help{font-size:14px;margin:5px 0 14px}button,.button{display:inline-block;font:inherit;font-weight:600;background:var(--accent);color:white;border:0;border-radius:9px;padding:11px 18px;cursor:pointer;text-decoration:none;margin:12px 8px 0 0}button:disabled{opacity:.5;cursor:wait}button.secondary{background:#e8effd;color:#244c9c}details{border:1px solid var(--border);border-radius:10px;padding:16px;margin:16px 0}summary{cursor:pointer;font-weight:650}pre,code{overflow-wrap:anywhere;white-space:pre-wrap;font-size:13px}pre{background:#f3f6fb;padding:18px;border-radius:9px;max-height:400px;overflow:auto}.notice{border-left:4px solid var(--accent);background:#edf3ff;padding:14px 18px;border-radius:7px}.error{border-color:#bb304b;background:#fff0f3;color:#86283b}.success{border-color:#14805d;background:#eaf8f2;color:#115c45}.status{font-size:20px;font-weight:650}footer{border-top:1px solid var(--border);margin-top:36px;padding:22px 0;color:var(--muted);font-size:14px}.row{padding:15px 0;border-bottom:1px solid var(--border)}.inline{display:inline-block;margin-right:10px}[hidden]{display:none!important}@media(max-width:600px){main{padding:18px 14px}section,.card{padding:19px}h1{font-size:27px}}
-.open-service{animation:service-pulse 1.5s ease-in-out infinite}@keyframes service-pulse{50%{box-shadow:0 0 0 9px #285cda30;transform:scale(1.025)}}@media(prefers-reduced-motion:reduce){.open-service{animation:none}}
+:root{color-scheme:light;--ink:#17243b;--muted:#56657a;--accent:#171717;--border:#d9e1ed}
+*{box-sizing:border-box}body{margin:0;background:#fff;color:var(--ink);font:16px/1.6 system-ui,-apple-system,sans-serif}main{max-width:1040px;margin:auto;padding:28px 22px}header{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:38px}.brand{font-size:23px;font-weight:750;text-decoration:none}.brand small{display:block;color:var(--muted);font-size:12px;font-weight:500}a{color:var(--accent)}nav{font-size:14px}h1{font-size:32px;line-height:1.2}h2{font-size:22px;margin-top:0}h3{font-size:18px}section,.card{background:white;border:1px solid var(--border);border-radius:16px;padding:26px;margin:20px 0;box-shadow:0 5px 20px #1b355507}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.grid section{margin:0}p,.help{color:var(--muted)}label{display:block;font-weight:600;margin:16px 0 4px}label.check{display:flex;align-items:flex-start;gap:10px;font-weight:500}input:not([type=checkbox]),textarea,select{font:inherit;width:100%;padding:10px 12px;border:1px solid #bcc9dc;border-radius:8px;background:white;color:var(--ink)}input[type=checkbox]{width:18px;height:18px;margin-top:4px}input:focus,textarea:focus,select:focus{outline:3px solid #aaa;outline-offset:1px}.help{font-size:14px;margin:5px 0 14px}button,.button{display:inline-block;font:inherit;font-weight:600;background:var(--accent);color:white;border:0;border-radius:9px;padding:11px 18px;cursor:pointer;text-decoration:none;margin:12px 8px 0 0}button:disabled{opacity:.5;cursor:wait}button.secondary{background:#f1f1f1;color:#171717}details{border:1px solid var(--border);border-radius:10px;padding:16px;margin:16px 0}summary{cursor:pointer;font-weight:650}pre,code{overflow-wrap:anywhere;white-space:pre-wrap;font-size:13px}pre{background:#f3f6fb;padding:18px;border-radius:9px;max-height:400px;overflow:auto}.notice{border-left:4px solid var(--accent);background:#f5f5f5;padding:14px 18px;border-radius:7px}.error{border-color:#bb304b;background:#fff0f3;color:#86283b}.success{border-color:#14805d;background:#eaf8f2;color:#115c45}.status{font-size:20px;font-weight:650}footer{border-top:1px solid var(--border);margin-top:36px;padding:22px 0;color:var(--muted);font-size:14px}.row{padding:15px 0;border-bottom:1px solid var(--border)}.inline{display:inline-block;margin-right:10px}[hidden]{display:none!important}@media(max-width:600px){main{padding:18px 14px}section,.card{padding:19px}h1{font-size:27px}}
+.open-service{animation:service-pulse 1.5s ease-in-out infinite}@keyframes service-pulse{50%{box-shadow:0 0 0 9px #00000020;transform:scale(1.025)}}@media(prefers-reduced-motion:reduce){.open-service{animation:none}}
 </style>
 CSS;
 }
@@ -1218,11 +1252,7 @@ function render_setup_form(array $values = [], array $errors = []): void {
     foreach ($errors as $error) echo '<p class="notice error">' . h(setup_error($error)) . '</p>';
     if (local_upload_available()) echo '<section><h2>' . ui('Already uploaded all files?', 'Уже загрузили все файлы?') . '</h2><p>' . ui('Use the same administration without a repository or GitHub key.', 'Откройте ту же админку без репозитория и ключа GitHub.') . '</p><a class="button secondary" href="?install=local">' . ui('Files are already uploaded', 'Файлы уже загружены — настроить без GitHub') . '</a></section>';
     echo '<section><form method="post">' . csrf_field();
-    field('repo', ui('Repository', 'Репозиторий'), $values['repo'] ?? '', ui('Copy owner/name from github.com/owner/name.', 'Скопируйте owner/name из адреса github.com/owner/name.'));
-    field('branch', ui('Branch', 'Ветка'), $values['branch'] ?? 'main', ui('Usually main. Updates are taken from this branch.', 'Обычно main. Обновления будут браться из этой ветки.'));
-    field('gh_token', ui('GitHub access key', 'Ключ доступа GitHub'), '', ui('Required for feedback and private repositories. The key stays on this server.', 'Нужен для обратной связи и закрытых репозиториев. Ключ хранится только на сервере.'), 'password');
-    echo '<a id="patbtn" class="button" target="_blank" rel="noopener" href="' . h(pat_url($values['repo'] ?? '', !empty($values['pr_number']))) . '">' . ui('Create access key', 'Создать ключ доступа') . '</a><p class="help">' . ui('Choose Only select repositories and select your repository. Permissions: Contents — Read, Issues — Read and write; Pull requests — Read for previews. Copy the generated key here.', 'Выберите Only select repositories и отметьте свой репозиторий. Права: Contents — Read, Issues — Read and write; для предпросмотра ещё Pull requests — Read. Скопируйте созданный ключ сюда.') . '</p>';
-    field('password', ui('Panel password', 'Пароль панели'), '', ui('Choose the installation password; email confirmation follows in administration.', 'Задайте пароль установки. После загрузки сайта админка попросит подтвердить email.'), 'password');
+    repository_fields($values);
     checkbox('auto_pull', ui('Automatically install updates while the panel is open', 'Автоматически устанавливать обновления, пока панель открыта'), (bool)($values['auto_pull'] ?? true));
     field('auto_interval', ui('Check every, seconds', 'Проверять каждые, секунд'), (string)($values['auto_interval'] ?? 60), ui('Minimum 15 seconds. 60 seconds is a good starting point.', 'Минимум 15 секунд. Для начала подойдёт 60.'), 'number');
     echo '<details><summary>' . ui('Advanced settings', 'Дополнительные настройки') . '</summary>';
@@ -1232,7 +1262,6 @@ function render_setup_form(array $values = [], array $errors = []): void {
     field('keep_files', ui('Files and folders to preserve', 'Файлы и папки, которые нужно сохранить'), $values['keep_files'] ?? '', ui('Separate names with commas: uploads, data, .env. Panel settings and keys are always preserved.', 'Разделяйте имена запятыми: uploads, data, .env. Настройки панели и ключи всегда сохраняются.'));
     checkbox('purge', ui('Delete server files that no longer exist in the repository', 'Удалять с сервера файлы, которых больше нет в репозитории'), (bool)($values['purge'] ?? false));
     echo '<p class="help">' . ui('Deletion is permanent. Preserve uploads, data and local secrets above first.', 'Удаление необратимо. Сначала укажите выше папки загрузок, данных и локальные секреты.') . '</p></details><button>' . ui('Save and continue', 'Сохранить и продолжить') . '</button></form></section>';
-    echo '<script>const repo=document.querySelector("#f_repo"),pr=document.querySelector("#f_pr_number"),link=document.querySelector("#patbtn");function tokenLink(){const u=new URL(link.href);u.searchParams.set("target_name",repo.value.split("/")[0]);if(pr.value)u.searchParams.set("pull_requests","read");else u.searchParams.delete("pull_requests");link.href=u.toString()}repo.addEventListener("input",tokenLink);pr.addEventListener("input",tokenLink);</script>';
     page_end();
 }
 function setup_error(string $message): string {
@@ -1249,7 +1278,7 @@ function setup_error(string $message): string {
     return ui($message, $map[$message] ?? $message);
 }
 function render_setup_done(array $config): void {
-    if (is_local_install($config)) { page_start(ui('Local setup saved', 'Локальная установка настроена')); echo '<section><p>' . ui('Files are ready. Sign in with the installation password, then verify your email.', 'Файлы готовы. Войдите с паролем установки, затем подтвердите email.') . '</p><a class="button" href="?">' . ui('Continue to administration', 'Продолжить настройку админки') . '</a><p><a href="../">' . ui('Open site', 'Открыть сайт') . '</a></p></section>'; page_end(); return; }
+    if (is_local_install($config)) { page_start(ui('Local setup saved', 'Локальная установка настроена')); echo '<section><p>' . ui('Files are ready. Sign in with the installation password, then verify your email.', 'Файлы готовы. Создайте учётную запись администратора и подтвердите email.') . '</p><a class="button" href="?">' . ui('Continue to administration', 'Продолжить настройку админки') . '</a><p><a href="../">' . ui('Open site', 'Открыть сайт') . '</a></p></section>'; page_end(); return; }
     page_start(ui('Your connection is ready', 'Подключение настроено'));
     echo '<section><p>' . ui('Settings saved. Open the panel to install your first version and set up AI connections.', 'Настройки сохранены. Откройте панель, чтобы установить первую версию и подключить нейросети.') . '</p><a class="button" href="?">' . ui('Open control panel', 'Открыть панель') . '</a></section>'; page_end();
 }
@@ -1257,10 +1286,15 @@ function start_output(bool $plain): void {
     $GLOBALS['TERM_PLAIN'] = $plain;
     if ($plain) { header('Content-Type: text/plain; charset=utf-8'); return; }
     page_start(ui('Updating your service', 'Обновление сервиса'));
-    echo '<section><p>' . ui('Please wait. Your files are being updated. The result will appear below.', 'Подождите: файлы сервиса обновляются. Результат появится ниже.') . '</p><details><summary>' . ui('Technical details for support', 'Технические сведения для поддержки') . '</summary><pre>';
+    echo '<section><progress data-deploy-progress max="12" value="0" style="width:100%"></progress><p role="status" data-deploy-step>Подготовка…</p><p data-deploy-result role="status" hidden></p><p>' . ui('Please wait. Your files are being updated. The result will appear below.', 'Подождите: файлы сервиса обновляются. Результат появится ниже.') . '</p><details><summary>' . ui('Technical details for support', 'Технические сведения для поддержки') . '</summary><pre>';
     if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 }
-function term(string $msg): void { echo !empty($GLOBALS['TERM_PLAIN']) ? $msg . "\n" : h($msg) . "\n"; }
+function term(string $msg): void {
+    echo !empty($GLOBALS['TERM_PLAIN']) ? $msg . "\n" : h($msg) . "\n";
+    if (empty($GLOBALS['TERM_PLAIN'])) echo '<script>document.querySelector("[data-deploy-step]").textContent=' . json_encode($msg, JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT) . ';var p=document.querySelector("[data-deploy-progress]");p.value=Math.min(p.max,p.value+1)</script>';
+    if (empty($GLOBALS['TERM_PLAIN']) && strpos($msg,'STATUS:')===0) echo '<script>var r=document.querySelector("[data-deploy-result]");r.hidden=false;r.className="notice ' . (strpos($msg,'DONE')!==false?'success':'error') . '";r.textContent=' . json_encode($msg, JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT) . ';</script>';
+    if (ob_get_level()) @ob_flush(); flush();
+}
 function end_output(): void { if (empty($GLOBALS['TERM_PLAIN'])) { echo '</pre></details><a class="button" href="?">' . ui('Back to panel', 'Вернуться в панель') . '</a></section>'; page_end(); } }
 function render_history_page(array $config): void {
     page_start(ui('Previous versions', 'Предыдущие версии'));
@@ -1269,15 +1303,17 @@ function render_history_page(array $config): void {
     if (!$versions) echo '<p>' . ui('No versions installed yet.', 'Пока нет установленных версий.') . '</p>';
     foreach ($versions as $entry) {
         echo '<div class="row"><strong>' . h($entry['at'] ?? '') . '</strong> · ' . h(short_sha($entry['sha'])) . ' · ' . h($entry['label'] ?? '');
+        if (!empty($entry['pr_summary'])) echo '<p>' . nl2br(h($entry['pr_summary'])) . '</p>';
         if ($entry['sha'] === ($state['sha'] ?? '')) echo ' — ' . ui('Installed now', 'Установлена сейчас');
-        else echo '<form method="post" action="?" class="inline">' . csrf_field() . '<input type="hidden" name="action" value="deploy"><input type="hidden" name="rollback" value="' . h($entry['sha']) . '"><button class="secondary">' . ui('Restore this version', 'Вернуть эту версию') . '</button></form>';
+        else echo '<form method="post" action="?" class="inline">' . csrf_field() . '<input type="hidden" name="action" value="deploy"><input type="hidden" name="' . (($entry['mode'] ?? '') === 'archive' ? 'rollback_archive' : 'rollback') . '" value="' . h($entry['sha']) . '"><button class="secondary">' . ui('Restore this version', 'Вернуть эту версию') . '</button></form>';
         echo '</div>';
     }
+    echo '<p class="notice">После отката попросите нейросеть: «Восстанови файлы коммита ' . h((string)($state['mode'] ?? '') === 'archive' ? 'из выбранного ZIP-архива (его хеш ' . (string)($state['sha'] ?? '') . ')' : (string)($state['sha'] ?? '')) . ' новым коммитом в main через PR. Сохрани последующую историю; не меняй главную ветку и не делай force push».</p>';
     echo '</section><a href="?">' . ui('Back to panel', 'Вернуться в панель') . '</a>'; page_end();
 }
 function render_watch_page(array $config): void { render_dashboard($config); }
 function render_dashboard(array $config, string $message = '', bool $error = false): void {
-    page_start(ui('Your service, under control', 'Ваш сервис под контролем'));
+    page_start(ui('Administration', 'Управление сервисом'));
     echo '<p><a href="?diagnostics=1">' . ui('Local diagnostics', 'Локальная диагностика') . '</a></p>';
     if (is_local_install($config)) echo '<p class="notice">' . ui('Local installation: files uploaded manually. GitHub checks are off.', 'Локальная установка: файлы загружены вручную. Проверки GitHub выключены.') . '</p>';
     if (!is_local_install($config)) echo '<p>' . h($config['repo']) . ' · ' . h($config['source'] === 'pr' ? 'PR #' . $config['pr_number'] : $config['branch']) . '</p>';
@@ -1291,6 +1327,7 @@ function render_dashboard(array $config, string $message = '', bool $error = fal
     field('auto_interval', ui('Interval in seconds', 'Интервал в секундах'), (string)$config['auto_interval'], ui('At least 15. Closing this page stops browser checks.', 'Не менее 15. После закрытия страницы проверки из браузера прекращаются.'), 'number');
     echo '<button class="secondary">' . ui('Save settings', 'Сохранить настройки') . '</button></form><p class="help">' . ui('For updates with the browser closed, ask your hosting provider to schedule the following cron command once a minute. If a password is set, pass it through the X-Pull-Password header.', 'Для обновлений при закрытом браузере попросите хостинг запускать эту команду cron раз в минуту. Если задан пароль, передайте его в заголовке X-Pull-Password.') . '</p><code>curl --fail -s -H "X-Pull-Password: YOUR_PANEL_PASSWORD" "https://YOUR_HOST/PATH/pull.php?check=1&amp;plain=1"</code></details></section>';
     }
+    echo '<section><h2>Загрузить ZIP-архив</h2><form method="post" enctype="multipart/form-data">' . csrf_field() . '<input type="hidden" name="action" value="archive"><label>Архив проекта<input type="file" name="archive" accept=".zip" required></label><p class="help">Настройки и данные сохраняются. Текущую версию можно вернуть через историю.</p><button>Установить архив</button></form></section>';
     echo '<section><h2>' . ui('Models, documents and mail', 'Модели, документы и почта') . '</h2><p><a class="button" href="?toolkit=1">' . ui('Open advanced settings', 'Открыть расширенные настройки') . '</a></p></section>';
     echo '<section id="security"><h2>' . ui('Panel password', 'Пароль панели') . '</h2><p>' . ui('Replace the password without exposing the current one.', 'Замените пароль, не раскрывая текущий.') . '</p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="password">';
     field('new_password', ui('New password', 'Новый пароль'), '', ui('At least 12 characters. It is saved only as a hash.', 'Не менее 12 символов. На сервере сохраняется только хеш.'), 'password');
@@ -1298,7 +1335,6 @@ function render_dashboard(array $config, string $message = '', bool $error = fal
     echo '<button class="secondary">' . ui('Replace password', 'Заменить пароль') . '</button></form></section>';
     feedback_form();
     render_ai_settings();
-    echo '<section id="embed-tip"><h2>' . ui('Make feedback easy to find', 'Сделайте обратную связь доступной') . '</h2><p>' . ui('Add this to your next development prompt. Click the text to copy it.', 'Добавьте это в следующий промпт для разработки. Нажмите на текст, чтобы скопировать.') . '</p><button type="button" class="secondary" id="copy-prompt">Embed pull.php feedback form directly into the interface of the service, so that users can immediately submit their complaints directly to the repository.</button><p id="copy-status" role="status"></p><label class="check"><input type="checkbox" id="hide-tip"><span>' . ui('Do not show again', 'Больше не показывать') . '</span></label></section>';
     $js = ['local' => is_local_install($config), 'csrf' => $_SESSION['pull_csrf'], 'interval' => $config['auto_interval'], 'auto' => $config['auto_pull'], 'ru' => $GLOBALS['pull_language'] === 'ru'];
     echo '<script>window.panelConfig=' . json_encode($js, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>' . panel_js();
     page_end();
@@ -1312,7 +1348,7 @@ function feedback_form(): void {
 
     echo '<section id="feedback"><h2>' . ui('Ideas for improvement', 'Идеи для доработки') . '</h2><p>' . ui('Your message becomes an issue in the connected GitHub repository. Do not include passwords or private customer information.', 'Сообщение станет задачей в подключённом репозитории GitHub. Не указывайте пароли и личные данные клиентов.') . '</p>';
     if ($issuesUrl !== '') echo '<p><a target="_blank" rel="noopener" href="' . h($issuesUrl) . '">' . ui('Open repository issues', 'Открыть все задачи репозитория') . '</a></p>';
-    echo '<form method="post" action="?feedback=1">' . csrf_field() . '<input type="hidden" name="action" value="feedback">';
+    echo '<form method="post" enctype="multipart/form-data" action="?feedback=1">' . csrf_field() . '<input type="hidden" name="action" value="feedback">';
     field('title', ui('Title (optional)', 'Название (необязательно)'), $title, ui('Leave empty to use a dated title.', 'Можно не заполнять: будет подставлено название с датой.'));
     field('description', ui('What should change?', 'Что нужно изменить?'), $description, ui('10–10,000 characters. Do not include secrets or customer personal data.', 'От 10 до 10 000 символов. Не указывайте секреты и персональные данные клиентов.'), 'textarea');
     $snapshot = diagnostic_snapshot();
@@ -1325,6 +1361,7 @@ function feedback_form(): void {
         echo '<input type="hidden" name="diagnostic_snapshot" value="' . h($id) . '"><p class="help">' . ui('Optional. Only this preview is sent with your idea. It contains error types and code locations, without request contents, customer data or keys.', 'Необязательно. Вместе с идеей будет отправлен только этот снимок: типы ошибок и места в коде, без содержимого запросов, данных клиентов и ключей.') . '</p><details><summary>' . ui('Preview diagnostic attachment', 'Посмотреть прикладываемый журнал') . '</summary><textarea readonly rows="10" aria-label="' . ui('Diagnostic attachment preview', 'Предпросмотр журнала') . '">' . h($snapshot) . '</textarea></details>';
     }
     if (is_local_install($config ?? [])) echo '<p class="notice">' . ui('Connect GitHub in the panel before sending. The text and log remain local until you submit.', 'Для отправки подключите GitHub в панели. До отправки текст и журнал остаются на сервере.') . '</p>';
+    feedback_media_controls();
     echo '<button>' . ui('Send idea', 'Отправить идею') . '</button></form></section>';
 }
 function render_feedback(string $message = '', bool $error = false, string $url = '', bool $celebrate = false, bool $tokenHelp = false): void {
@@ -1375,6 +1412,7 @@ function send_feedback(array $config, string $token): void {
         }
         $body .= "\n\n### Диагностика — приложена пользователем\n\n```text\n" . str_replace("`", "'", $snapshot) . "\n```";
     }
+    try { $body .= feedback_screenshots($config['repo'], $token); } catch (Throwable $e) { http_response_code(422); render_feedback($e->getMessage(),true); return; }
     // A failed request also starts the cooldown, avoiding accidental repeated submissions.
     $_SESSION['feedback_at'] = time();
     [$code, $data] = github_create_feedback($config['repo'], $token, $title, $body);
@@ -1414,8 +1452,8 @@ function render_ai_settings(): void {
     if (!is_file(PULL_ROOT . '/admin/llm_connector/adapter.php')) { echo '<p>' . ui('Install the latest version first to load the AI connection module.', 'Сначала установите актуальную версию, чтобы загрузить модуль подключения нейросетей.') . '</p></section>'; return; }
     $cfg = ai_config();
     echo '<form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="ai">';
-    field('order', ui('Provider order', 'Порядок провайдеров'), implode(', ', $cfg['order']), ui('Comma-separated: yandex, genrouter, openrouter. Disabled providers are skipped.', 'Через запятую: yandex, genrouter, openrouter. Отключённые провайдеры пропускаются.'));
-    $providers = ['genrouter', 'yandex', 'openrouter'];
+    field('order', ui('Provider order', 'Порядок провайдеров'), implode(', ', $cfg['order']), ui('Comma-separated: genrouter, openrouter, yandex. Disabled providers are skipped.', 'Через запятую: genrouter, openrouter, yandex. Отключённые провайдеры пропускаются.'));
+    $providers = ['genrouter', 'openrouter', 'yandex'];
     foreach ($providers as $provider) {
         $p = $cfg[$provider];
         echo '<details' . ($provider === 'genrouter' ? ' open' : '') . '><summary>' . h(ucfirst($provider)) . '</summary>';
@@ -1431,11 +1469,13 @@ function render_ai_settings(): void {
             field('yandex_openai_base', ui('OpenAI-compatible base URL', 'Базовый URL OpenAI-совместимого API'), $p['openai_base'], ui('Default: https://ai.api.cloud.yandex.net/v1. Use this route for Qwen, Llama and other open models; YandexGPT uses the Foundation Models route above.', 'По умолчанию: https://ai.api.cloud.yandex.net/v1. Используйте этот маршрут для Qwen, Llama и других открытых моделей; для YandexGPT выберите маршрут Foundation Models выше.'));
         }
         field($provider . '_model', ui('Model identifier', 'Идентификатор модели'), $p['model'], ui('Use the exact identifier from the model catalog. Save before testing or loading the catalog.', 'Укажите точный идентификатор из каталога моделей. Сохраните настройки перед проверкой или загрузкой каталога.'));
+        if ($provider === 'openrouter') {
         field($provider . '_proxy', ui('Proxy for this provider (optional)', 'Прокси для этого провайдера (необязательно)'), '', ($p['proxy'] !== '' ? ui('Proxy saved. Leave blank to keep it.', 'Прокси сохранён. Оставьте пустым, чтобы не менять.') : ui('For example http://user:password@host:port. Leave empty for a direct connection.', 'Например http://user:password@host:port. Пустое поле — прямое соединение.')), 'password');
         checkbox($provider . '_clear_proxy', ui('Remove saved proxy', 'Удалить сохранённый прокси'), false);
+        }
         echo '</details>';
     }
-    echo '<button>' . ui('Save AI connections', 'Сохранить подключения') . '</button></form><p class="help">' . ui('Testing sends a small paid request. Catalog loading does not generate text. Save changes first.', 'Проверка отправляет небольшой платный запрос. Загрузка каталога не генерирует текст. Сначала сохраните изменения.') . '</p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="ai_test"><label>' . ui('Provider', 'Провайдер') . '<select name="provider"><option>genrouter</option><option>yandex</option><option>openrouter</option></select></label><button class="secondary" name="operation" value="test">' . ui('Test connection', 'Проверить подключение') . '</button><button class="secondary" name="operation" value="models">' . ui('Load model catalog', 'Загрузить каталог моделей') . '</button></form></section>';
+    echo '<button>' . ui('Save AI connections', 'Сохранить подключения') . '</button></form><p class="help">' . ui('Testing sends a small paid request. Catalog loading does not generate text. Save changes first.', 'Проверка отправляет небольшой платный запрос. Загрузка каталога не генерирует текст. Сначала сохраните изменения.') . '</p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="ai_test"><label>' . ui('Provider', 'Провайдер') . '<select name="provider"><option>genrouter</option><option>openrouter</option><option>yandex</option></select></label><button class="secondary" name="operation" value="test">' . ui('Test connection', 'Проверить подключение') . '</button><button class="secondary" name="operation" value="models">' . ui('Load model catalog', 'Загрузить каталог моделей') . '</button></form></section>';
 }
 function save_php_config(string $path, array $config): bool {
     $temp = tempnam(dirname($path), '.pull-config-');
@@ -1448,6 +1488,9 @@ function save_php_config(string $path, array $config): bool {
 }
 function handle_panel_post(array $config, string $token): void {
     $action = (string)($_POST['action'] ?? '');
+if (in_array($action, ['github_repositories','github_branches'], true)) { repository_discovery($token); exit; }
+    if ($action === 'archive' || isset($_POST['rollback_archive'])) { archive_deploy($config); exit; }
+    if ($action === 'feedback_transcribe') { feedback_transcribe(); exit; }
     if ($action === 'feedback') { send_feedback($config, $token); exit; }
     if (is_local_install($config) && $action === 'auto') { http_response_code(409); render_dashboard($config, ui('Connect GitHub first.', 'Сначала подключите GitHub.'), true); exit; }
     if ($action === 'connect_repository') {
@@ -1459,7 +1502,7 @@ function handle_panel_post(array $config, string $token): void {
         }
         $path = PULL_ROOT . '/pull-config.php';
         $raw = require $path;
-        $next = array_replace($raw, ['installation_mode' => 'github', 'repo' => $repo, 'branch' => $branch, 'gh_token' => $key, 'source' => 'branch', 'pr_number' => 0, 'auto_pull' => false]);
+        $next = array_replace($raw, ['installation_mode' => 'github', 'repo' => $repo, 'branch' => $branch, 'gh_token' => $key, 'source' => 'branch', 'pr_number' => 0, 'auto_pull' => true]);
         if (!save_php_config($path, $next)) { http_response_code(422); render_dashboard($config, ui('Cannot save connection.', 'Не удалось сохранить подключение.'), true); exit; }
         header('Location: ?', true, 303); exit;
     }
@@ -1505,6 +1548,7 @@ function handle_panel_post(array $config, string $token): void {
                     unset($p);
                 }
                 $ok = save_php_config(PULL_ROOT . '/ai-config.php', $cfg);
+                if ($ok && class_exists('PDO') && in_array('sqlite', PDO::getAvailableDrivers(), true)) sync_genrouter_toolkit($cfg);
             } else {
                 $provider = (string)($_POST['provider'] ?? '');
                 if (!in_array($provider, LLM::PROVIDERS, true)) throw new RuntimeException('provider');
@@ -1550,15 +1594,184 @@ function panel_js(): string {
   }catch(e){status.textContent=e.message;}finally{busy=false;if(!stopped)setTimeout(check,c.interval*1000);}
  }
  check();
- const key='neurosaas:embed-tip:'+location.pathname,tip=document.querySelector('#embed-tip');
- try{if(localStorage.getItem(key)==='hidden')tip.hidden=true;}catch{}
- document.querySelector('#hide-tip').addEventListener('change',e=>{if(e.target.checked){try{localStorage.setItem(key,'hidden');}catch{}tip.hidden=true;}});
- document.querySelector('#copy-prompt').addEventListener('click',async e=>{
-  const text=e.currentTarget.textContent;let ok=false;
-  try{await navigator.clipboard.writeText(text);ok=true;}catch{const el=document.createElement('textarea');el.value=text;document.body.append(el);el.select();ok=document.execCommand('copy');el.remove();}
-  document.querySelector('#copy-status').textContent=ok?t('Copied.','Скопировано.'):t('Select the text and copy it manually.','Выделите текст и скопируйте вручную.');
- });
 })();
 </script>
 JS;
 }
+
+
+/** Read-only GitHub discovery with browser POST/CSRF; never return the key. */
+function repository_discovery(string $fallback): void {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    $key = trim((string)($_POST['gh_token'] ?? '')) ?: $fallback;
+    if ($key === '' || preg_match('/[\r\n]/',$key)) { http_response_code(422); echo json_encode(['error'=>'Вставьте ключ доступа GitHub.']); return; }
+    $branch = ($_POST['action'] ?? '') === 'github_branches';
+    $repo = trim((string)($_POST['repo'] ?? ''));
+    if ($branch && !preg_match('~^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$~D',$repo)) { http_response_code(422); echo json_encode(['error'=>'Выберите репозиторий.']); return; }
+    $items=[];
+    for ($page=1; $page<=10; $page++) {
+        $path=$branch ? '/repos/'.$repo.'/branches?per_page=100&page='.$page : '/user/repos?per_page=100&sort=updated&page='.$page;
+        [$data,$error]=gh_api($path,$key);
+        if ($error!=='' || !is_array($data)) { http_response_code(502); echo json_encode(['error'=>'Не удалось загрузить список GitHub. Проверьте ключ и доступ к репозиторию.']); return; }
+        foreach($data as $item) {
+            if ($branch && isset($item['name'])) $items[]=['value'=>$item['name'],'label'=>$item['name']];
+            elseif (!$branch && isset($item['full_name'])) $items[]=['value'=>$item['full_name'],'label'=>$item['full_name'],'default_branch'=>$item['default_branch'] ?? 'main'];
+        }
+        if(count($data)<100)break;
+    }
+    echo json_encode(['items'=>$items],JSON_UNESCAPED_UNICODE);
+}
+
+/** Same token-first selector for initial setup and authenticated connection. */
+function repository_fields(array $values): void {
+    echo '<a id="patbtn" class="button" href="'.h(pat_url((string)($values['repo'] ?? ''),true)).'" target="_blank" rel="noopener">Создать ключ доступа</a><p class="help">Выберите свой репозиторий. Права уже указаны: Contents — Read and write (скриншоты), Issues — Read and write, Pull requests — Read.</p>';
+    field('gh_token','Ключ доступа GitHub','','Вставьте только ключ: репозитории и ветки загрузятся ниже. Ключ остаётся на сервере.','password');
+    echo '<p data-repo-status role="status"></p><label for="f_repo">Репозиторий</label><select name="repo" id="f_repo"><option value="'.h($values['repo'] ?? '').'">'.h($values['repo'] ?? 'Вставьте ключ доступа').'</option></select><label for="f_branch">Ветка</label><select name="branch" id="f_branch"><option value="main">main</option></select>';
+    echo <<<'HTML'
+<script>(()=>{const f=document.currentScript.closest('form'),k=f.querySelector('[name=gh_token]'),repo=f.querySelector('[name=repo]'),branch=f.querySelector('[name=branch]'),status=f.querySelector('[data-repo-status]');let seq=0;
+const request=async(action)=>{const data=new FormData();data.set('action',action);data.set('csrf',f.querySelector('[name=csrf]').value);data.set('gh_token',k.value);data.set('repo',repo.value);const res=await fetch('?',{method:'POST',body:data,credentials:'same-origin'});const d=await res.json();if(!res.ok||d.error)throw Error(d.error||'Ошибка GitHub');return d.items||[]};
+async function branches(){const id=++seq;status.textContent='Загружаем ветки…';try{const items=await request('github_branches');if(id!==seq)return;branch.replaceChildren(...items.map(x=>new Option(x.label,x.value)));if(items.some(x=>x.value==='main'))branch.value='main';status.textContent='Выберите ветку и продолжите.'}catch(e){if(id===seq)status.textContent=e.message}}
+k.addEventListener('change',async()=>{const id=++seq;status.textContent='Загружаем репозитории…';try{const items=await request('github_repositories');if(id!==seq)return;repo.replaceChildren(...items.map(x=>new Option(x.label,x.value)));status.textContent=items.length?'Выберите репозиторий.':'Ключ не видит репозиториев.';if(items.length)branches()}catch(e){if(id===seq)status.textContent=e.message}});repo.addEventListener('change',branches);})();</script>
+HTML;
+}
+
+/** Validate every ZIP member before extraction or any live-file mutation. */
+function validate_archive(ZipArchive $zip): void {
+    $total=0;
+    for($i=0;$i<$zip->numFiles;$i++) {
+        $entry=$zip->statIndex($i); $name=str_replace('\\','/',(string)$entry['name']);
+        if($name==='' || $name[0]==='/' || preg_match('~^[A-Za-z]:|(?:^|/)\.\.(?:/|$)|\x00~',$name)) throw new RuntimeException('Небезопасный путь в архиве');
+        $opsys=0;$attrs=0;$zip->getExternalAttributesIndex($i,$opsys,$attrs);
+        if(($attrs>>16&0170000)===0120000) throw new RuntimeException('Символические ссылки в архиве запрещены');
+        $total+=(int)$entry['size'];
+        if((int)$entry['size']>100*1024*1024 || $total>500*1024*1024) throw new RuntimeException('Архив слишком велик после распаковки');
+    }
+}
+function archive_store(string $path): string {
+    $sha=sha1_file($path);$dir=PULL_ROOT.'/pull-archives';
+    if(!is_dir($dir)&&!mkdir($dir,0700,true))throw new RuntimeException('Не удалось сохранить архив для отката');
+    $data=['zip'=>base64_encode((string)file_get_contents($path))];
+    if(!save_php_config($dir.'/'.$sha.'.php',$data))throw new RuntimeException('Архив отката не сохранён');
+    return $sha;
+}
+function archive_deploy(array $config): void {
+    $lock=fopen(PULL_ROOT.'/pull-deploy.lock','c');
+    if(!$lock||!flock($lock,LOCK_EX|LOCK_NB)){http_response_code(409);render_dashboard($config,'Обновление уже выполняется',true);return;}
+    $tmp=sys_get_temp_dir().'/neurosaas-archive-'.bin2hex(random_bytes(8));mkdir($tmp,0700);
+    $started=microtime(true);start_output(false);
+    try {
+        $wanted=(string)($_POST['rollback_archive'] ?? '');
+        if($wanted!=='') {
+            $known=false;foreach(history_versions(state_read())as$entry)if(($entry['mode']??'')==='archive'&&($entry['sha']??'')===$wanted)$known=true;
+            if(!$known||!preg_match('/^[a-f0-9]{40}$/D',$wanted))throw new RuntimeException('Архив отсутствует в истории');
+            $stored=require PULL_ROOT.'/pull-archives/'.$wanted.'.php';$bytes=base64_decode((string)($stored['zip']??''),true);
+            if($bytes===false||sha1($bytes)!==$wanted)throw new RuntimeException('Архив отката повреждён');
+            file_put_contents($tmp.'/source.zip',$bytes);$label='Восстановлен архив '.short_sha($wanted);
+        } else {
+            $file=$_FILES['archive']??[];
+            if(($file['error']??UPLOAD_ERR_NO_FILE)!==UPLOAD_ERR_OK||($file['size']??0)>100*1024*1024)throw new RuntimeException('Загрузите ZIP до 100 МБ');
+            if(!move_uploaded_file((string)$file['tmp_name'],$tmp.'/source.zip'))throw new RuntimeException('Архив не загружен');
+            $label=substr(basename((string)($file['name']??'archive.zip')),0,120);
+        }
+        term('Проверяем архив');$zip=new ZipArchive();if($zip->open($tmp.'/source.zip')!==true)throw new RuntimeException('Не удалось открыть ZIP');
+        validate_archive($zip);mkdir($tmp.'/files');if(!$zip->extractTo($tmp.'/files'))throw new RuntimeException('Не удалось распаковать ZIP');$zip->close();
+        $entries=array_values(array_diff(scandir($tmp.'/files'),['.','..']));
+        $src=count($entries)===1&&is_dir($tmp.'/files/'.$entries[0])?$tmp.'/files/'.$entries[0]:$tmp.'/files';
+        if(!is_file($src.'/index.php')&&!is_file($src.'/index.html'))throw new RuntimeException('В архиве нет index.php или index.html');
+        $keep=array_values(array_unique(array_merge(ALWAYS_KEEP,(array)$config['keep_files'])));
+        // Snapshot the prior manual install too, so its first update is reversible.
+        if(empty(state_read()['sha'])) {
+            $backup=new ZipArchive();$backup->open($tmp.'/before.zip',ZipArchive::CREATE);
+            $it=new RecursiveIteratorIterator(new RecursiveDirectoryIterator(PULL_ROOT,FilesystemIterator::SKIP_DOTS));
+            foreach($it as$file){$rel=substr($file->getPathname(),strlen(PULL_ROOT)+1);$skip=false;foreach($keep as$path)if($rel===$path||strpos($rel,$path.'/')===0)$skip=true;if(!$skip&&$file->isFile()&&!$file->isLink())$backup->addFile($file->getPathname(),$rel);}
+            $backup->close();$before=archive_store($tmp.'/before.zip');state_record_deploy(['sha'=>$before,'mode'=>'archive','ref'=>'archive','label'=>'До первого обновления архивом','at'=>date('Y-m-d H:i:s'),'status'=>'ok'],false);
+        }
+        $sha=archive_store($tmp.'/source.zip');term('Копируем файлы, сохраняя настройки и данные');$copied=0;copyTree($src,PULL_ROOT,$keep,$copied);
+        state_record_deploy(['sha'=>$sha,'mode'=>'archive','ref'=>'archive','label'=>$label,'at'=>date('Y-m-d H:i:s'),'status'=>'ok','files'=>$copied,'rollback'=>$wanted!==''],true);
+        term('STATUS: DONE · файлов: '.$copied);term('Автообновления приостановлены до явной установки версии из GitHub');
+    } catch(Throwable $e){http_response_code(422);term('STATUS: ERROR · '.$e->getMessage());}
+    finally{cleanup($tmp);flock($lock,LOCK_UN);fclose($lock);end_output();}
+}
+
+/** GitHub requests for screenshots use the same user token as issue creation. */
+function feedback_github(string $method,string $endpoint,string $token,?array $data=null): array {
+    $ch=curl_init('https://api.github.com/'.$endpoint);
+    curl_setopt_array($ch,[CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>['Authorization: Bearer '.$token,'Accept: application/vnd.github+json','User-Agent: NeuroSaaS-feedback','Content-Type: application/json'],CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT=>30,CURLOPT_FOLLOWLOCATION=>false]);
+    if($data!==null)curl_setopt($ch,CURLOPT_POSTFIELDS,json_encode($data));
+    $body=curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);curl_close($ch);
+    return [$code,json_decode((string)$body,true)?:[]];
+}
+function feedback_screenshots(string $repo,string $token): string {
+    $files=$_FILES['screenshots']??null;if(!$files||!is_array($files['name']??null))return '';
+    $kept=[];$types=['image/png'=>'png','image/jpeg'=>'jpg','image/webp'=>'webp'];
+    // Validate the complete batch before any GitHub write.
+    foreach($files['name']as$i=>$name){$error=$files['error'][$i]??UPLOAD_ERR_NO_FILE;if($error===UPLOAD_ERR_NO_FILE)continue;
+        if(count($kept)>=5||$error!==UPLOAD_ERR_OK||($files['size'][$i]??0)>5*1024*1024)throw new RuntimeException('Не более пяти изображений по 5 МБ');
+        $path=$files['tmp_name'][$i];$mime=(new finfo(FILEINFO_MIME_TYPE))->file($path);
+        if(!isset($types[$mime])||!@getimagesize($path))throw new RuntimeException('Разрешены скриншоты PNG, JPEG и WebP');
+        $kept[]=['path'=>$path,'ext'=>$types[$mime]];
+    }
+    if(!$kept)return '';
+    [$code,$ref]=feedback_github('GET','repos/'.$repo.'/git/ref/heads/support-assets',$token);
+    if($code===404){[$ok,$head]=feedback_github('GET','repos/'.$repo.'/git/ref/heads/main',$token);if($ok!==200){[$metaCode,$meta]=feedback_github('GET','repos/'.$repo,$token);if($metaCode===200)[$ok,$head]=feedback_github('GET','repos/'.$repo.'/git/ref/heads/'.rawurlencode((string)($meta['default_branch']??'main')),$token);}
+        if($ok!==200)throw new RuntimeException('Не удалось определить ветку для файлов поддержки');[$code,$ref]=feedback_github('POST','repos/'.$repo.'/git/refs',$token,['ref'=>'refs/heads/support-assets','sha'=>$head['object']['sha']]);}
+    if(!in_array($code,[200,201],true))throw new RuntimeException('Для скриншотов нужен токен с Contents: Read and write');
+    $out="\n\n### Скриншоты\n";
+    foreach($kept as$file){$path='support/uploads/'.gmdate('Y/m').'/'.bin2hex(random_bytes(12)).'.'.$file['ext'];
+        [$code,$result]=feedback_github('PUT','repos/'.$repo.'/contents/'.$path,$token,['branch'=>'support-assets','message'=>'Attach feedback screenshot','content'=>base64_encode((string)file_get_contents($file['path']))]);
+        if($code!==201)throw new RuntimeException('Скриншот не сохранён в GitHub; обращение не отправлено');
+        $out.="\n![Скриншот](https://github.com/".$repo.'/blob/support-assets/'.$path."?raw=true)\n";
+    }return $out;
+}
+/** Audio is sent only after an explicit record/recognize action. */
+function feedback_transcribe(): void {
+    header('Content-Type: application/json; charset=utf-8');header('Cache-Control: no-store');
+    try {
+        $cfg=require PULL_ROOT.'/admin/llm_connector/config.php';$model=(string)($cfg['LLM_AUDIO_MODEL']??'');$provider=strpos($model,'openrouter:')===0?'openrouter':'genrouter';$key=(string)($cfg[$provider==='genrouter'?'GENROUTER_API_KEY':'OPENROUTER_API_KEY']??'');
+        if($key===''||!preg_match('/^(genrouter|openrouter):.+$/D',$model))throw new RuntimeException('Подключите GenRouter и выберите голосовую модель в расширенных настройках');
+        $f=$_FILES['audio']??[];if(($f['error']??UPLOAD_ERR_NO_FILE)!==UPLOAD_ERR_OK||($f['size']??0)>10*1024*1024)throw new RuntimeException('Запись не загружена или превышает 10 МБ');
+        $base=$provider==='genrouter'?rtrim((string)$cfg['GENROUTER_BASE_URL'],'/'):'https://openrouter.ai/api/v1';
+        $slug=substr($model,strpos($model,':')+1);$transport='chat';foreach((array)$cfg['AVAILABLE_MODELS']as$row)if(($row['provider']??'')===$provider&&($row['full_id']??'')===$slug)$transport=$row['audio_transport']??'chat';
+        $ch=curl_init($base.($transport==='transcriptions'?'/audio/transcriptions':'/chat/completions'));
+        $mime=(string)($f['type']??'audio/webm');$format=strpos($mime,'ogg')!==false?'ogg':(strpos($mime,'mpeg')!==false?'mp3':'webm');
+        $body=['model'=>$slug,'temperature'=>0,'messages'=>[['role'=>'user','content'=>[['type'=>'text','text'=>'Transcribe this Russian audio. Preserve every fact, add punctuation and repair word agreement. Return only the transcript.'],['type'=>'input_audio','input_audio'=>['format'=>$format,'data'=>base64_encode((string)file_get_contents($f['tmp_name']))]]]]]];
+        $headers=['Authorization: Bearer '.$key];
+        if($transport==='transcriptions')$payload=['model'=>$slug,'file'=>new CURLFile($f['tmp_name'],$mime,'voice.'.$format),'language'=>'ru'];else{$headers[]='Content-Type: application/json';$payload=json_encode($body);}
+        curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_HTTPHEADER=>$headers,CURLOPT_POSTFIELDS=>$payload,CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT=>90]);
+        $raw=curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);curl_close($ch);$data=json_decode((string)$raw,true);$text=$data['text']??$data['choices'][0]['message']['content']??'';
+        if($code!==200||!is_string($text)||trim($text)==='')throw new RuntimeException('Модель не распознала запись. Проверьте поддержку аудио выбранной моделью.');
+        echo json_encode(['text'=>$text],JSON_UNESCAPED_UNICODE);
+    }catch(Throwable $e){http_response_code(422);echo json_encode(['error'=>$e->getMessage()],JSON_UNESCAPED_UNICODE);}
+}
+function feedback_media_controls(): void {
+    $ready=false;
+    if(is_file(PULL_ROOT.'/admin/llm_connector/config.php')){ $cfg=require PULL_ROOT.'/admin/llm_connector/config.php';$model=(string)($cfg['LLM_AUDIO_MODEL']??'');$ready=($model!=='' && (!empty($cfg['GENROUTER_API_KEY']) || !empty($cfg['OPENROUTER_API_KEY']))); }
+    echo '<label>Скриншоты (или вставьте из буфера)<input type="file" name="screenshots[]" accept="image/png,image/jpeg,image/webp" multiple></label><p data-shot-status role="status"></p><button type="button" data-dictate' . ($ready ? '' : ' hidden') . '>Надиктовать</button><p data-voice-status role="status"></p>';
+    echo <<<'HTML'
+<script>(()=>{const f=document.currentScript.closest('form'),files=f.querySelector('[name="screenshots[]"]'),body=f.querySelector('[name=description]'),btn=f.querySelector('[data-dictate]'),status=f.querySelector('[data-voice-status]');let rec=null,timer;
+f.addEventListener('paste',e=>{const images=[...e.clipboardData.files].filter(x=>x.type.startsWith('image/'));if(!images.length)return;e.preventDefault();const list=new DataTransfer();[...files.files,...images].slice(0,5).forEach(x=>list.items.add(x));files.files=list.files;f.querySelector('[data-shot-status]').textContent='Приложено изображений: '+list.files.length;});
+btn.addEventListener('click',async()=>{if(rec&&rec.state==='recording'){rec.stop();return;}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true}),chunks=[];rec=new MediaRecorder(stream);const started=Date.now();rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};rec.onstop=async()=>{clearInterval(timer);stream.getTracks().forEach(x=>x.stop());btn.disabled=true;status.textContent='Распознаём…';const data=new FormData();data.set('action','feedback_transcribe');data.set('csrf',f.querySelector('[name=csrf]').value);data.set('audio',new Blob(chunks,{type:rec.mimeType}),'voice.webm');try{const res=await fetch('?',{method:'POST',body:data}),d=await res.json();if(!res.ok||d.error)throw Error(d.error||'Ошибка распознавания');body.value+=(body.value?'\n':'')+d.text;body.dispatchEvent(new Event('input',{bubbles:true}));status.textContent='Расшифровка добавлена.'}catch(e){status.textContent=e.message}finally{btn.disabled=false;btn.textContent='Надиктовать'}};rec.start();btn.textContent='Остановить';timer=setInterval(()=>{const left=Math.max(0,30-Math.floor((Date.now()-started)/1000));status.textContent='Осталось секунд: '+left;if(!left&&rec.state==='recording')rec.stop()},300)}catch(e){status.textContent='Для записи нужен HTTPS и доступ к микрофону.'}});})();</script>
+HTML;
+}
+function feedback_dialog(): void {
+    if(isset($_GET['embedded']))return;
+    echo <<<'HTML'
+<dialog id="change-dialog" style="position:fixed;inset:auto;left:4vw;top:8vh;margin:0;width:min(800px,92vw);height:80vh;padding:0;border:1px solid #aaa;border-radius:12px"><header id="change-drag" tabindex="0" aria-label="Переместить окно стрелками или перетащить" style="cursor:move;touch-action:none;padding:12px;margin:0;background:#eee"><strong>Заказать доработку · перетащите за эту полосу</strong><button type="button" onclick="document.getElementById('change-dialog').close()">×</button></header><iframe title="Идеи для доработки" style="border:0;width:100%;height:calc(100% - 70px)"></iframe></dialog>
+<script>(()=>{const d=document.getElementById('change-dialog'),handle=document.getElementById('change-drag');document.querySelectorAll('a[href="?feedback=1"]').forEach(a=>a.addEventListener('click',e=>{if(typeof d.showModal!=='function')return;e.preventDefault();const frame=d.querySelector('iframe');if(!frame.src)frame.src='?feedback=1&embedded=1';d.showModal()}));let origin;const move=(x,y)=>{d.style.left=Math.max(0,Math.min(innerWidth-d.offsetWidth,x))+'px';d.style.top=Math.max(0,Math.min(innerHeight-d.offsetHeight,y))+'px'};handle.addEventListener('pointerdown',e=>{if(e.target.closest('button'))return;const r=d.getBoundingClientRect();origin={x:e.clientX,y:e.clientY,left:r.left,top:r.top};handle.setPointerCapture(e.pointerId)});handle.addEventListener('pointermove',e=>{if(origin)move(origin.left+e.clientX-origin.x,origin.top+e.clientY-origin.y)});handle.addEventListener('pointerup',()=>origin=null);handle.addEventListener('pointercancel',()=>origin=null);handle.addEventListener('keydown',e=>{const delta={ArrowLeft:[-10,0],ArrowRight:[10,0],ArrowUp:[0,-10],ArrowDown:[0,10]}[e.key];if(delta){e.preventDefault();const r=d.getBoundingClientRect();move(r.left+delta[0],r.top+delta[1])}})})();</script>
+HTML;
+}
+
+/** Keep the original host adapter and advanced toolkit on the same GenRouter key. */
+function sync_genrouter_toolkit(array $cfg): void {
+    require_once PULL_ROOT.'/admin/llm_connector/settings_store.php';
+    $settings=require PULL_ROOT.'/admin/llm_connector/config.php';
+    $store=new SettingsStore((string)$settings['DB_PATH']);
+    $store->setSetting('GENROUTER_API_KEY',(string)($cfg['genrouter']['key']??''));
+    if(!empty($cfg['genrouter']['model'])){ $store->setSetting('GENROUTER_MODEL',(string)$cfg['genrouter']['model']); if(($cfg['order'][0]??'')==='genrouter')$store->setSetting('LLM_DEFAULT_MODEL','genrouter:'.(string)$cfg['genrouter']['model']); }
+    $store->setSetting('LLM_PROVIDER_PRIORITY',implode(',',(array)$cfg['order']));
+    $store->setSetting('LLM_PROVIDER',(string)($cfg['order'][0]??'genrouter'));
+}
+
+NEUROSAAS_ENGINE_20;
+eval(substr($neurosaas_engine, 5));

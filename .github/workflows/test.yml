@@ -17,9 +17,27 @@ jobs:
       - run: php tests/layout.php
       - run: php tests/toolkit.php
       - run: php tests/diagnostics.php
+      - run: php tests/operator_workflows.php
+      - run: python3 tests/pull_python.py
       - run: for file in admin/llm_connector/tests/*.php; do php "$file" || exit 1; done
       - run: python3 tests/http_test.py
       - run: python3 tests/toolkit_http.py
       - run: python3 tests/account_http.py
       - run: python3 tests/local_diagnostics_http.py
 
+
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: curl, pdo_sqlite, zip, dom, mbstring, openssl
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix work/browser-tools playwright
+      - run: work/browser-tools/node_modules/.bin/playwright install --with-deps chromium
+      - run: NODE_PATH="$PWD/work/browser-tools/node_modules" node tests/browser_operator_workflows.cjs

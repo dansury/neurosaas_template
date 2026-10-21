@@ -43,6 +43,7 @@ with tempfile.TemporaryDirectory(prefix='neurosaas-http-') as work:
         file_put_contents($dest, 'mock archive'); return [12, ''];
     }''')
     source = source.replace("if (defined('PULL_LIBRARY_ONLY')) return;", '''class ZipArchive {
+        public $numFiles = 0;
         public function open($path) { return true; }
         public function extractTo($path) {
             mkdir($path . '/repository'); file_put_contents($path . '/repository/index.html', 'deployed'); return true;
@@ -96,7 +97,7 @@ with tempfile.TemporaryDirectory(prefix='neurosaas-http-') as work:
         status, html = request()
         expect(status == 401 and 'Вход в управление' in html, 'password gate')
         status, html = request(data={'csrf': csrf(html), 'password': 'sample-pass'})
-        expect(status == 200 and 'Ваш сервис под контролем' in html, 'sign in to dashboard')
+        expect(status == 200 and 'Управление сервисом' in html, 'sign in to dashboard')
         expect(not (work / 'pull-state.json').exists() and not (work / 'pull-deploy.lock').exists(), 'GET and login never deploy')
         expect('FAKE_KEY' not in html and 'sample-pass' not in html, 'secrets never returned')
         expect('<details open><summary>Genrouter' in html and '<details><summary>Openrouter' in html, 'GenRouter starts open and OpenRouter stays collapsed')
@@ -104,7 +105,7 @@ with tempfile.TemporaryDirectory(prefix='neurosaas-http-') as work:
         expect('Идеи для доработки' in html and 'owner/repo/issues' in html, 'feedback is renamed and links the repository')
         expect('может не работать на российских хостингах' in html, 'provider hosting warning remains visible')
         expect('Ваш сервис' in html and 'NeuroSaaS</title>' not in html and 'https://dansury.github.io' in html and 'https://t.me/dansury.vj' in html, 'neutral panel preserves owner consultation links')
-        expect('Embed pull.php feedback form directly into the interface of the service' in html and 'Больше не показывать' in html, 'embedding prompt and dismissal')
+        expect('embed-tip' not in html and 'Ваш сервис под контролем' not in html, 'obsolete embedding prompt and slogan removed')
         token = csrf(html)
         status, state = request('?status=1')
         expect(status == 200 and json.loads(state)['changed'], 'status detects new version')
@@ -184,7 +185,7 @@ with tempfile.TemporaryDirectory(prefix='neurosaas-http-') as work:
         third = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         _, html = request(client=third)
         status, html = request(data={'csrf': csrf(html), 'password': 'changed-pass'}, client=third)
-        expect(status == 200 and 'Ваш сервис под контролем' in html, 'the replacement password grants a fresh login')
+        expect(status == 200 and 'Управление сервисом' in html, 'the replacement password grants a fresh login')
         logs.flush(); logs.seek(0)
         expect('Fatal error' not in logs.read(), 'no PHP fatal errors')
         print(f'{checks} HTTP checks passed')
@@ -192,3 +193,4 @@ with tempfile.TemporaryDirectory(prefix='neurosaas-http-') as work:
         server.terminate()
         server.wait(timeout=5)
         logs.close()
+

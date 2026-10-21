@@ -34,6 +34,7 @@ DiagLog::init((string) $cfg['DB_PATH'], DiagLog::codeStamp([
 DiagLog::addSecret((string) ($cfg['OPENROUTER_API_KEY'] ?? ''));
 DiagLog::addSecret((string) ($cfg['YANDEX_API_KEY'] ?? ''));
 DiagLog::addSecret((string) ($cfg['SMTP_PASS'] ?? ''));
+DiagLog::addSecret((string) ($cfg['GENROUTER_API_KEY'] ?? ''));
 DiagLog::addSecret((string) ($cfg['ADMIN_PASSWORD'] ?? ''));
 ToolkitLLM::init($cfg, DiagLog::store());
 
@@ -83,9 +84,10 @@ if (!$hostAuthenticated && empty($_SESSION['admin_authed'])) {
 input, select, textarea, button, .box { border-radius: 8px; }
       body { font-family: -apple-system, system-ui, sans-serif; background: #fff; color: #17243b; padding: 24px; }
       .box { max-width: 340px; margin: 80px auto; background: #fff; border: 1px solid #d9e1ed; padding: 28px 26px; }
-      h1 { font-size: 20px; margin: 0 0 18px; }
+      .catalog-reset { padding:2px 7px; background:transparent; color:#555; opacity:.65; margin-left:4px; font-size:14px; }
+  h1 { font-size: 20px; margin: 0 0 18px; }
       input { width: 100%; padding: 10px 12px; background: #fff; color: #17243b; border: 1px solid #d9e1ed; font: inherit; margin-bottom: 14px; }
-      button { background: #2357cc; color: #fff; border: 0; padding: 12px 18px; font-weight: 700; cursor: pointer; width: 100%; }
+      button { background: #171717; color: #fff; border: 0; padding: 12px 18px; font-weight: 700; cursor: pointer; width: 100%; }
       .err { color: #a82742; font-size: 13px; margin: 0 0 12px; }
     </style></head><body>
     <div class="box">
@@ -125,7 +127,7 @@ if ($method === 'POST') {
     if (isset($_POST['model_catalog'])) {
         // Keys just typed into the form are saved before the fetch — otherwise
         // the catalogue would be pulled with the previous credentials.
-        foreach (['OPENROUTER_API_KEY', 'YANDEX_API_KEY', 'YANDEX_FOLDER_ID'] as $k) {
+        foreach (['GENROUTER_API_KEY', 'OPENROUTER_API_KEY', 'YANDEX_API_KEY', 'YANDEX_FOLDER_ID'] as $k) {
             $v = trim((string) ($_POST[$k] ?? ''));
             if ($v !== '') $store->setSetting($k, $v);
         }
@@ -189,7 +191,7 @@ if ($method === 'POST') {
             'LLM_PROVIDER', 'LLM_PROVIDER_PRIORITY', 'LLM_DEFAULT_MODEL',
             'LLM_FALLBACK_MODE', 'MODEL_CATALOG_TTL_MIN', 'LLM_MAX_TOKENS',
             'LLM_OCR_MODELS', 'YANDEX_OCR_MODEL',
-            'OPENROUTER_API_KEY', 'YANDEX_API_KEY', 'YANDEX_FOLDER_ID',
+            'GENROUTER_API_KEY', 'GENROUTER_BASE_URL', 'GENROUTER_MODEL', 'LLM_AUDIO_MODEL', 'OPENROUTER_API_KEY', 'YANDEX_API_KEY', 'YANDEX_FOLDER_ID',
             'ADMIN_EMAIL', 'ERROR_EMAIL',
             'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME',
             'ADMIN_PASSWORD',
@@ -248,6 +250,7 @@ ToolkitLLM::init($cfg, DiagLog::store());
 // Nobody types a slug: every model field is a <select> built from the same
 // catalogue (hardcoded rows + what the providers reported).
 $groups = [];
+usort($cfg['AVAILABLE_MODELS'], static function(array $a,array $b):int { $rank=['genrouter'=>0,'openrouter'=>1,'yandex'=>2];return ($rank[$a['provider'] ?? ''] ?? 3)<=>($rank[$b['provider'] ?? ''] ?? 3); });
 foreach ((array) ($cfg['AVAILABLE_MODELS'] ?? []) as $mdl) {
     if (empty($mdl['ocr_only'])) $groups[(string) ($mdl['group'] ?? 'Модели')][] = $mdl;
 }
@@ -313,17 +316,18 @@ if ($vision_cur !== '' && strpos($vision_cur, ':') === false) {
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
 input, select, textarea, button, .box { border-radius: 8px; }
-  body { font-family: -apple-system, system-ui, sans-serif; background: #fff; color: #17243b; padding: 24px; max-width: 720px; margin: 0 auto; }
-  h1 { font-size: 22px; } h2 { font-size: 16px; margin: 26px 0 10px; color: #2357cc; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #fff; color: #17243b; padding: 70px 24px 24px; max-width: 720px; margin: 0 auto; }
+  .catalog-reset { padding:2px 7px; background:transparent; color:#555; opacity:.65; margin-left:4px; font-size:14px; }
+  h1 { font-size: 22px; } h2 { font-size: 16px; margin: 26px 0 10px; color: #171717; }
   .lede { color: #56657a; font-size: 14px; }
   label { display: block; margin: 12px 0; font-size: 14px; }
   label span { display: block; color: #56657a; margin-bottom: 4px; }
   input, select { width: 100%; padding: 9px 11px; background: #fff; color: #17243b; border: 1px solid #d9e1ed; font: inherit; }
-  button { background: #2357cc; color: #fff; border: 0; padding: 12px 20px; font-weight: 700; cursor: pointer; }
+  button { background: #171717; color: #fff; border: 0; padding: 12px 20px; font-weight: 700; cursor: pointer; }
   .msg { padding: 10px 12px; margin: 8px 0; border: 1px solid #d9e1ed; font-size: 14px; }
   .msg.ok { border-color: #1f6f4f; } .msg.bad { border-color: #a82742; }
   .row { display: flex; flex-wrap: wrap; gap: 12px; } .row > * { flex: 1 1 220px; min-width: 0; }
-  a { color: #2357cc; }
+  a { color: #171717; }
 </style></head><body>
 <h1>llm_connector — настройки <a href="?logout=1" style="font-size:13px;float:right">выйти</a></h1>
 <p class="lede">Заполните только нужные поля — пустые значения не перезаписывают существующие. Значения сразу применяются ко всему сервису (overlay через таблицу <code>settings</code>).</p>
@@ -355,12 +359,14 @@ echo Selfheal\SelfHeal::adminNotice();
   <div class="row">
     <label><span>Провайдер по умолчанию</span>
       <select name="LLM_PROVIDER">
+        <option value="genrouter" <?= $eff('LLM_PROVIDER') === 'genrouter' ? 'selected' : '' ?>>GenRouter</option>
         <option value="openrouter" <?= $eff('LLM_PROVIDER') === 'openrouter' ? 'selected' : '' ?>>openrouter (fallback → yandex)</option>
         <option value="yandex" <?= $eff('LLM_PROVIDER') === 'yandex' ? 'selected' : '' ?>>yandex</option>
       </select>
     </label>
     <label><span>Приоритет провайдеров</span>
       <select name="LLM_PROVIDER_PRIORITY">
+        <option value="genrouter,openrouter,yandex" <?= $eff('LLM_PROVIDER_PRIORITY') === 'genrouter,openrouter,yandex' ? 'selected' : '' ?>>GenRouter → OpenRouter → Yandex</option>
         <option value="openrouter,yandex" <?= $eff('LLM_PROVIDER_PRIORITY') === 'openrouter,yandex' ? 'selected' : '' ?>>openrouter → yandex</option>
         <option value="yandex,openrouter" <?= $eff('LLM_PROVIDER_PRIORITY') === 'yandex,openrouter' ? 'selected' : '' ?>>yandex → openrouter</option>
       </select>
@@ -393,7 +399,7 @@ echo Selfheal\SelfHeal::adminNotice();
   <div class="row" id="catalog">
     <button type="submit" name="model_catalog" value="refresh" formaction="setup.php#catalog" formnovalidate>Обновить каталог моделей</button>
     <?php if ($live_rows): ?>
-      <button type="submit" name="model_catalog" value="forget" formaction="setup.php#catalog" formnovalidate>Забыть живой каталог</button>
+      <button type="submit" name="model_catalog" value="forget" aria-label="Забыть живой каталог" title="Забыть живой каталог" class="catalog-reset" formaction="setup.php#catalog" formnovalidate>×</button>
     <?php endif; ?>
   </div>
   <?= $render_msgs('catalog') ?>
@@ -427,7 +433,7 @@ echo Selfheal\SelfHeal::adminNotice();
       </label>
     <?php endfor; ?>
   </div>
-  <label><span>Vision-модель: фото, этикетки и страницы PDF (OpenRouter и Yandex — только модели со зрением)</span>
+  <label><span>Vision-модель: фото, этикетки и страницы PDF (GenRouter, OpenRouter и Yandex — только модели со зрением)</span>
     <?= $model_select('LLM_VISION_MODEL', $vision_cur, $by_slug, $only_vision, '— не задана (значение из config.php) —') ?>
   </label>
   <label><span>OpenRouter fallback-модель (последняя попытка на этом провайдере)</span>
@@ -454,18 +460,25 @@ echo Selfheal\SelfHeal::adminNotice();
     <span style="margin:0;">Включить Yandex Vision OCR в цепочку PDF-распознавания</span>
   </label>
 
+  <label><span>Голосовая модель (GenRouter / OpenRouter)</span>
+    <?= $model_select('LLM_AUDIO_MODEL', $eff('LLM_AUDIO_MODEL'), $by_slug, static function(array $m):bool{return !empty($m['audio']);}, '— подключите GenRouter и обновите каталог —') ?>
+  </label>
   <h2>API-ключи</h2>
+  <label><span>GenRouter API Key</span><input type="password" name="GENROUTER_API_KEY" placeholder="<?= $h($mask_key($eff('GENROUTER_API_KEY'))) ?>"></label>
+  <details><summary>Подключить дополнительные провайдеры</summary>
   <label><span>OpenRouter API Key</span><input type="password" name="OPENROUTER_API_KEY" placeholder="<?= $h($mask_key($eff('OPENROUTER_API_KEY'))) ?>"></label>
   <label><span>Yandex API Key</span><input type="password" name="YANDEX_API_KEY" placeholder="<?= $h($mask_key($eff('YANDEX_API_KEY'))) ?>"></label>
   <label><span>Yandex Folder ID</span><input type="text" name="YANDEX_FOLDER_ID" placeholder="<?= $h($eff('YANDEX_FOLDER_ID')) ?>"></label>
 
+  </details>
   <h2>Почта (SMTP)</h2>
+  <p>SMTP — подключение почтового сервера для отправки писем из вашего сервиса. Если сервис не отправляет письма, эти поля можно не заполнять. Подтверждение email администратора также может использовать почту хостинга.</p>
   <div class="row">
-    <label><span>SMTP host</span><input type="text" name="SMTP_HOST" placeholder="<?= $h($eff('SMTP_HOST') ?: 'smtp.yandex.ru') ?>"></label>
+    <label><span>SMTP host</span><input type="text" name="SMTP_HOST" placeholder="<?= $h($eff('SMTP_HOST') ?: 'smtp.example.com') ?>"></label>
     <label><span>SMTP port</span><input type="text" name="SMTP_PORT" placeholder="<?= $h($eff('SMTP_PORT') ?: '465') ?>"></label>
   </div>
   <label><span>SMTP user</span><input type="text" name="SMTP_USER" placeholder="<?= $h($eff('SMTP_USER')) ?>"></label>
-  <label><span>SMTP password</span><input type="password" name="SMTP_PASS" placeholder="<?= $h($mask($eff('SMTP_PASS'))) ?>"></label>
+  <label><span>Пароль приложения</span><input type="password" name="SMTP_PASS" placeholder="<?= $h($mask($eff('SMTP_PASS'))) ?>"></label>
   <div class="row">
     <label><span>SMTP from</span><input type="text" name="SMTP_FROM" placeholder="<?= $h($eff('SMTP_FROM')) ?>"></label>
     <label><span>From name</span><input type="text" name="SMTP_FROM_NAME" placeholder="<?= $h($eff('SMTP_FROM_NAME') ?: 'llm_connector') ?>"></label>
@@ -570,9 +583,11 @@ function diagCopy(id, btn) {
 </script>
 
 <form method="post" action="setup.php#smtp" id="smtp" autocomplete="off" style="margin-top:18px;">
+  <script>(()=>{const host=document.querySelector('[name=SMTP_HOST]'),pass=document.querySelector('[name=SMTP_PASS]');if(!host||!pass)return;const note=document.createElement('p');note.className='lede';pass.parentElement.after(note);const help=()=>{const h=host.value.toLowerCase();let url='',label='';if(h.includes('yandex')){url='https://id.yandex.ru/security/app-passwords';label='Яндекс';}else if(h.includes('mail.ru')||h.includes('bk.ru')||h.includes('list.ru')||h.includes('inbox.ru')){url='https://id.mail.ru/security/passwords';label='Mail.ru';}else if(h.includes('gmail')||h.includes('google')){url='https://myaccount.google.com/apppasswords';label='Google (нужна двухэтапная аутентификация)';}note.replaceChildren();if(url){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener';a.textContent='Создать пароль приложения — '+label;note.append(a);}};host.addEventListener('input',help);help()})();</script>
   <h2>Тест SMTP</h2>
   <label><span>Кому отправить тестовое письмо</span><input type="text" name="smtp_test_to" placeholder="<?= $h($eff('ADMIN_EMAIL')) ?>"></label>
   <p><button type="submit" name="smtp_test" value="1">Отправить тестовое письмо</button></p>
   <?= $render_msgs('smtp') ?>
 </form>
 </body></html>
+

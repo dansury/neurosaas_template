@@ -8,7 +8,7 @@ $runtime = __DIR__ . '/deployment/panel.php';
 $installer = $root . '/pull.php';
 $source = file_get_contents($runtime);
 $standalone = str_replace("define('PULL_ROOT', dirname(__DIR__, 2))", "define('PULL_ROOT', __DIR__)", $source);
-if (is_file($installer) && strpos((string)file_get_contents($installer), "define('PULL_ROOT'") === false) {
+if (is_file($installer) && (string)file_get_contents($installer) !== $standalone) {
     $lock = fopen($root . '/pull-deploy.lock', 'c');
     if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
         http_response_code(503); exit('Идёт обновление. Повторите вход после его завершения.');
@@ -26,3 +26,4 @@ if (is_file($installer) && strpos((string)file_get_contents($installer), "define
     }
 }
 require $runtime;
+

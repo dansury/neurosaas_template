@@ -25,7 +25,7 @@ if (!function_exists('cfg_env')) {
 if (!function_exists('cfg_settings_whitelist')) {
     function cfg_settings_whitelist(): array {
         return [
-            'LLM_PROVIDER', 'LLM_DEFAULT_MODEL', 'LLM_PROVIDER_PRIORITY',
+            'LLM_PROVIDER', 'LLM_DEFAULT_MODEL', 'LLM_PROVIDER_PRIORITY', 'GENROUTER_API_KEY', 'GENROUTER_BASE_URL', 'GENROUTER_MODEL', 'LLM_AUDIO_MODEL',
             'OPENROUTER_API_KEY', 'LLM_VISION_MODEL', 'LLM_FALLBACK_MODEL',
             'LLM_FALLBACK_MODE', 'LLM_FALLBACK_MODELS',
             // Live model catalogue: cache, refresh stamp, last failure, TTL.
@@ -46,10 +46,10 @@ if (!function_exists('cfg_settings_whitelist')) {
 
 $config = [
     /* ── LLM provider switch ── */
-    'LLM_PROVIDER'          => cfg_env('LLM_PROVIDER', 'openrouter'),       // 'yandex' | 'openrouter'
-    'LLM_DEFAULT_MODEL'     => cfg_env('LLM_DEFAULT_MODEL', 'gemini-2.0-flash'),
+    'LLM_PROVIDER'          => cfg_env('LLM_PROVIDER', 'genrouter'),       // 'yandex' | 'openrouter'
+    'LLM_DEFAULT_MODEL'     => cfg_env('LLM_DEFAULT_MODEL', ''),
     // Comma-separated provider fallback order for LLM::dispatch(). Primary first.
-    'LLM_PROVIDER_PRIORITY' => cfg_env('LLM_PROVIDER_PRIORITY', 'openrouter,yandex'),
+    'LLM_PROVIDER_PRIORITY' => cfg_env('LLM_PROVIDER_PRIORITY', 'GENROUTER_API_KEY', 'GENROUTER_BASE_URL', 'GENROUTER_MODEL', 'LLM_AUDIO_MODEL', 'openrouter,yandex'),
     // What to try right after the chosen model:
     //   auto   — a NEWER VERSION of the same model from the catalogue
     //            (gpt-4.1 → gpt-5.1), then LLM_FALLBACK_MODELS;
@@ -59,10 +59,14 @@ $config = [
     // provider after the chosen model and its newer versions.
     'LLM_FALLBACK_MODELS'   => cfg_env('LLM_FALLBACK_MODELS', ''),
 
+    'GENROUTER_API_KEY' => cfg_env('GENROUTER_API_KEY', ''),
+    'GENROUTER_BASE_URL' => cfg_env('GENROUTER_BASE_URL', 'https://api.genrouter.ru/v1'),
+    'GENROUTER_MODEL' => cfg_env('GENROUTER_MODEL', ''),
+    'LLM_AUDIO_MODEL' => cfg_env('LLM_AUDIO_MODEL', ''),
     /* ── OpenRouter ── (supply key via ENV or setup.php) */
     'OPENROUTER_API_KEY'    => cfg_env('OPENROUTER_API_KEY', ''),
     'OPENROUTER_URL'        => 'https://openrouter.ai/api/v1/chat/completions',
-    'LLM_VISION_MODEL'      => cfg_env('LLM_VISION_MODEL', 'yandex:qwen3.6-35b-a3b'),
+    'LLM_VISION_MODEL'      => cfg_env('LLM_VISION_MODEL', ''),
     'LLM_FALLBACK_MODEL'    => cfg_env('LLM_FALLBACK_MODEL', 'openrouter/auto'),
     'YANDEX_FALLBACK_MODEL' => cfg_env('YANDEX_FALLBACK_MODEL', 'yandexgpt-5-lite'),
     /* ── Live model catalogue ─────────────────────────────────────────────
@@ -111,7 +115,7 @@ $config = [
     'ADMIN_EMAIL'           => cfg_env('ADMIN_EMAIL', ''),
     // Error-notification mailbox (throttled; see Mailer::sendErrorNotification).
     'ERROR_EMAIL'           => cfg_env('ERROR_EMAIL', ''),
-    'SMTP_HOST'             => cfg_env('SMTP_HOST', 'smtp.yandex.ru'),
+    'SMTP_HOST'             => cfg_env('SMTP_HOST', ''),
     'SMTP_PORT'             => (int) cfg_env('SMTP_PORT', '465'),
     'SMTP_USER'             => cfg_env('SMTP_USER', ''),
     'SMTP_PASS'             => cfg_env('SMTP_PASS', ''),
@@ -218,4 +222,13 @@ $config = [
     if ($live) $config['AVAILABLE_MODELS'] = ModelCatalog::merge($config['AVAILABLE_MODELS'], $live);
 })($config);
 
+// New installs select only provider-confirmed capabilities, never guessed slugs.
+foreach ($config['AVAILABLE_MODELS'] as $row) {
+    if (($row['provider'] ?? '') !== 'genrouter' || empty($row['live'])) continue;
+    if ($config['LLM_DEFAULT_MODEL'] === '' && ($row['audio_transport'] ?? '') !== 'transcriptions' && empty($row['ocr_only'])) $config['LLM_DEFAULT_MODEL'] = $row['id'];
+    if ($config['GENROUTER_MODEL'] === '' && ($row['audio_transport'] ?? '') !== 'transcriptions' && empty($row['ocr_only'])) $config['GENROUTER_MODEL'] = $row['full_id'];
+    if ($config['LLM_VISION_MODEL'] === '' && !empty($row['vision'])) $config['LLM_VISION_MODEL'] = 'genrouter:' . $row['full_id'];
+    if ($config['LLM_AUDIO_MODEL'] === '' && !empty($row['audio'])) $config['LLM_AUDIO_MODEL'] = 'genrouter:' . $row['full_id'];
+}
 return $config;
+

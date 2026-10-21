@@ -127,7 +127,7 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
         expect("'admin_email_verified' => true" in raw and "owner@example.test" in raw and "confirmed-password" not in raw, "verified email and password hash persisted")
         token = csrf(html)
         status, html = request(data=dict(csrf=token, password="confirmed-password"))
-        expect(status == 200 and "Ваш сервис под контролем" in html, "new password grants dashboard")
+        expect(status == 200 and "Управление сервисом" in html, "new password grants dashboard")
         status, html = request("/pull.php?feedback=1")
         expect(status == 200 and "Идеи для доработки" in html, "legacy browser route reaches authenticated administration")
         status, html = request("/index.php")
@@ -156,7 +156,7 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
         expect(status == 401, "password reset invalidates previously authenticated browser")
         token = csrf(html)
         status, html = request(data=dict(csrf=token, password="replacement-password"))
-        expect(status == 200 and "Ваш сервис под контролем" in html, "replacement password works")
+        expect(status == 200 and "Управление сервисом" in html, "replacement password works")
         # A data file has a PHP envelope and exposes no contents via the PHP server.
         status, body = request("/admin/account/data/state.php")
         expect(status == 200 and body == "", "challenge never disclosed over HTTP")
@@ -167,3 +167,4 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
         server.terminate()
         server.wait(timeout=5)
         logs.close()
+

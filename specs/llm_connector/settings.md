@@ -42,16 +42,16 @@ Keys outside the whitelist are ENV/code-only (e.g. `OPENROUTER_URL`, `LLM_TIMEOU
 
 | Group | Keys (default) |
 |---|---|
-| Provider switch | `LLM_PROVIDER` (`openrouter`), `LLM_DEFAULT_MODEL` (`gemini-2.0-flash`), `LLM_PROVIDER_PRIORITY` (`openrouter,yandex`) |
+| Provider switch | `LLM_PROVIDER` (`genrouter`), `LLM_DEFAULT_MODEL` (first confirmed GenRouter chat model), `LLM_PROVIDER_PRIORITY` (`genrouter,openrouter,yandex`) |
 | Fallback | `LLM_FALLBACK_MODE` (`auto` — a newer version of the same model first; `manual` — list only), `LLM_FALLBACK_MODELS` (`` — comma-separated short ids, written by three dropdowns in `setup.php`) |
 | Model catalogue | `MODEL_CATALOG_MODELS` (``), `MODEL_CATALOG_SYNCED_AT` (``), `MODEL_CATALOG_ERROR` (``), `MODEL_CATALOG_TTL_MIN` (15) — see `/specs/llm_connector/model_catalog.md` |
 | OpenRouter | `OPENROUTER_API_KEY` (``), `OPENROUTER_URL` (chat/completions), `LLM_FALLBACK_MODEL` (`openrouter/auto`), `LLM_OCR_MODELS` (array, comma-split from ENV) |
-| Vision | `LLM_VISION_MODEL` (`yandex:qwen3.6-35b-a3b`) — the model for photos, labels and PDF pages. Accepts `"<provider>:<slug>"`, a short id, or a bare slug (bare = OpenRouter), so a Yandex multimodal model can be chosen here too (`/specs/llm_connector/llm.md` §2) |
+| Vision | `LLM_VISION_MODEL` (first confirmed GenRouter vision model when unset) — the model for photos, labels and PDF pages. Accepts `"<provider>:<slug>"`, a short id, or a bare slug (bare = OpenRouter), so a Yandex multimodal model can be chosen here too (`/specs/llm_connector/llm.md` §2) |
 | Yandex Cloud | `YANDEX_API_KEY`, `YANDEX_FOLDER_ID`, `YANDEX_LLM_URL` (OpenAI-compatible), `YANDEX_LLM_URL_FM` (`…/foundationModels/v1/completion` — the second address, used for a model the first one does not serve, `/specs/llm_connector/llm.md` §5.1), `YANDEX_MODELS_URL` (`…/foundationModels/v1/models` — the Models API the catalogue refresh asks first), `YANDEX_OCR_URL` (`…/ocr/v1/recognizeText`), `YANDEX_OCR_MODEL` (`page`), `YANDEX_OCR_ENABLED` (`1`), `YANDEX_FALLBACK_MODEL` (`yandexgpt-5-lite`) |
 | Answer length | `LLM_MAX_TOKENS` (`0` — the provider's own limit; above zero it is sent as `max_tokens` / `completionOptions.maxTokens`, raised when the journal reports an answer cut off mid-value) |
 | Timeouts | `LLM_TIMEOUT_SEC` (120), `LLM_MAX_RETRIES` (2) |
 | Admin gate | `ADMIN_PASSWORD` (``) |
-| Mail | `ADMIN_EMAIL`, `ERROR_EMAIL`, `SMTP_HOST` (`smtp.yandex.ru`), `SMTP_PORT` (465), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (← `SMTP_USER`), `SMTP_FROM_NAME` |
+| Mail | `ADMIN_EMAIL`, `ERROR_EMAIL`, `SMTP_HOST` (empty), `SMTP_PORT` (465), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (← `SMTP_USER`), `SMTP_FROM_NAME` |
 | Storage | `DB_PATH` (`data/app.db`), `LOG_DIR` (`data/logs`), `PROMPT_VERSION` |
 
 No secret ever has a non-empty default in code.
@@ -85,7 +85,7 @@ Rows also carry `context` — the model's context window in tokens — where the
 documents one; `price_in`/`price_out` stay `0.0` where no RUB estimate is worth stating,
 and the dropdown then shows the model without a price rather than an invented one.
 
-`qwen3.6-35b-a3b` — the default `LLM_VISION_MODEL` — is hardcoded with `vision => true`
+`qwen3.6-35b-a3b` — an optional Yandex vision model — is hardcoded with `vision => true`
 for a second reason: its slug carries no `-vl-` segment, so the name heuristic that flags
 Yandex live rows as multimodal (`/specs/llm_connector/model_catalog.md` §4) cannot name it, and without
 the hardcoded row a photo step would drop it as image-blind.
@@ -194,3 +194,15 @@ No model field is free text: every one of them is a `<select>` over the catalogu
 
 Deployment note: the page must not be reachable without TLS, and `ADMIN_PASSWORD` must
 be set before the file is exposed to the web.
+
+
+## GenRouter and operator controls
+
+GENROUTER_API_KEY, GENROUTER_BASE_URL, GENROUTER_MODEL and LLM_AUDIO_MODEL are
+whitelisted settings. GenRouter is first in fresh provider choices, API-key fields
+and model groups; existing saved values win. Empty default text/vision/audio
+choices resolve only to capabilities reported by GenRouter. Secondary providers
+are explicit disclosures; only OpenRouter has a proxy. The catalog reset is a
+small cross beside refresh. SMTP has no provider placeholder and explains its
+optional purpose and application-password links for Yandex, Mail.ru and Gmail.
+The shared top-right feedback widget is available on the starter and toolkit.

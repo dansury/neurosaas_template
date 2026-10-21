@@ -31,7 +31,7 @@ final class Toolkit
         if ($store->getSetting('NEUROSAAS_MIGRATED') === null) {
             $legacy = is_file(self::root() . '/ai-config.php') ? require self::root() . '/ai-config.php' : [];
             $legacy = is_array($legacy) ? $legacy : [];
-            $map = ['yandex' => ['key' => 'YANDEX_API_KEY', 'folder' => 'YANDEX_FOLDER_ID'],
+            $map = ['genrouter' => ['key' => 'GENROUTER_API_KEY', 'model' => 'GENROUTER_MODEL'], 'yandex' => ['key' => 'YANDEX_API_KEY', 'folder' => 'YANDEX_FOLDER_ID'],
                     'openrouter' => ['key' => 'OPENROUTER_API_KEY']];
             foreach ($map as $provider => $keys) {
                 if (empty($legacy[$provider]['enabled'])) continue;
@@ -41,7 +41,7 @@ final class Toolkit
                 }
             }
             $order = array_values(array_filter($legacy['order'] ?? [], static function ($p) use ($legacy): bool {
-                return in_array($p, ['yandex', 'openrouter'], true) && !empty($legacy[$p]['enabled']);
+                return in_array($p, ['genrouter', 'openrouter', 'yandex'], true) && !empty($legacy[$p]['enabled']);
             }));
             if ($order !== []) {
                 if ($store->getSetting('LLM_PROVIDER_PRIORITY') === null) $store->setSetting('LLM_PROVIDER_PRIORITY', implode(',', $order));
@@ -126,14 +126,17 @@ final class Toolkit
     {
         self::boot();
         if (!defined('SITE_TOOLKIT_HOST_AUTHENTICATED')) define('SITE_TOOLKIT_HOST_AUTHENTICATED', true);
-        ob_start(static function (string $html) use ($csrf): string {
+        require_once self::module() . '/feedback_widget.php';
+        ob_start(); \neurosaas_feedback_widget('?feedback=1'); $feedbackWidget=(string)ob_get_clean();
+        ob_start(static function (string $html) use ($csrf,$feedbackWidget): string {
             $html = str_replace('setup.php', '?toolkit=1', $html);
             $field = '<input type="hidden" name="csrf" value="' . htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') . '">';
             $html = preg_replace('~(<form\\b[^>]*>)~i', '$1' . $field, $html);
-            return str_replace('</body>', '<p><a href="?">Вернуться в панель NeuroSaaS</a></p></body>', $html);
+            return str_replace('</body>', $feedbackWidget . '<p><a href="?">Вернуться в панель NeuroSaaS</a></p></body>', $html);
         });
         require self::module() . '/setup.php';
         ob_end_flush();
     }
 }
+
 

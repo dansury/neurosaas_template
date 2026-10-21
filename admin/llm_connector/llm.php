@@ -151,19 +151,19 @@ final class ToolkitLLM {
     /** Per-session provider override ('openrouter' | 'yandex'). NULL → use cfg.LLM_PROVIDER. */
     public static function setProviderOverride(?string $provider): void {
         $provider = $provider !== null ? strtolower(trim($provider)) : '';
-        self::$providerOverride = in_array($provider, ['openrouter', 'yandex'], true) ? $provider : null;
+        self::$providerOverride = in_array($provider, ['genrouter', 'openrouter', 'yandex'], true) ? $provider : null;
     }
 
     public static function effectiveProvider(): string {
         if (self::$providerOverride !== null) return self::$providerOverride;
-        return self::cfg()['LLM_PROVIDER'] ?? 'openrouter';
+        return self::cfg()['LLM_PROVIDER'] ?? 'genrouter';
     }
 
     /** Ordered provider fallback list from LLM_PROVIDER_PRIORITY. Validates against
      *  known providers, dedupes, and guarantees both appear so a leg is never dropped. */
     private static function providerPriority(): array {
-        $known = ['openrouter', 'yandex'];
-        $raw = (string) (self::cfg()['LLM_PROVIDER_PRIORITY'] ?? 'openrouter,yandex');
+        $known = ['genrouter', 'openrouter', 'yandex'];
+        $raw = (string) (self::cfg()['LLM_PROVIDER_PRIORITY'] ?? 'genrouter,openrouter,yandex');
         $list = [];
         foreach (explode(',', $raw) as $p) {
             $p = strtolower(trim($p));
@@ -225,7 +225,7 @@ final class ToolkitLLM {
         $spec = trim($spec);
         if ($spec === '') return null;
         $provider = null;
-        if (preg_match('~^(openrouter|yandex):(.+)$~i', $spec, $m)) {
+        if (preg_match('~^(genrouter|openrouter|yandex):(.+)$~i', $spec, $m)) {
             $provider = strtolower($m[1]);
             $spec = trim($m[2]);
         }
@@ -309,7 +309,7 @@ final class ToolkitLLM {
     private static function activeModel(): array {
         $shortId = self::$modelOverride ?: (self::cfg()['LLM_DEFAULT_MODEL'] ?? 'yandexgpt-5-lite');
         $effective = self::effectiveProvider();
-        $row = self::findModel($shortId);
+        $row = self::resolveModelSpec($shortId);
         // OCR-only models (Yandex Vision OCR) are not chat models.
         if ($row !== null && !empty($row['ocr_only'])) $row = null;
         if ($row !== null && self::$providerOverride !== null && ($row['provider'] ?? '') !== $effective) {
@@ -529,9 +529,10 @@ final class ToolkitLLM {
         $primary = self::activeModel();
         $provider = $primary['provider'] ?? self::effectiveProvider();
 
+        $hasGR = !empty($cfg['GENROUTER_API_KEY']);
         $hasOR = !empty($cfg['OPENROUTER_API_KEY']);
         $hasYA = !empty($cfg['YANDEX_API_KEY']) && !empty($cfg['YANDEX_FOLDER_ID']);
-        $providerReady = ($provider === 'openrouter' && $hasOR) || ($provider === 'yandex' && $hasYA);
+        $providerReady = ($provider === 'genrouter' && $hasGR) || ($provider === 'openrouter' && $hasOR) || ($provider === 'yandex' && $hasYA);
         if (!$providerReady) {
             return [
                 self::callJson($specA['step'], $specA['system'], $specA['user'], $sessionId, (float) $specA['temp']),
@@ -753,13 +754,14 @@ final class ToolkitLLM {
             }
             $url = (string) $cfg['YANDEX_LLM_URL'];
         } else {
-            $url = (string) $cfg['OPENROUTER_URL'];
-            if (empty($cfg['OPENROUTER_API_KEY'])) {
+            $routerKey = $provider === 'genrouter' ? 'GENROUTER_API_KEY' : 'OPENROUTER_API_KEY';
+            $url = $provider === 'genrouter' ? rtrim((string)($cfg['GENROUTER_BASE_URL'] ?? 'https://api.genrouter.ru/v1'), '/') . '/chat/completions' : (string)$cfg['OPENROUTER_URL'];
+            if (empty($cfg[$routerKey])) {
                 throw new RuntimeException('OpenRouter not configured (OPENROUTER_API_KEY empty)');
             }
             $modelStr = (string) $modelRow['full_id'];
             $headers = [
-                'Authorization: Bearer ' . $cfg['OPENROUTER_API_KEY'],
+                'Authorization: Bearer ' . $cfg[$routerKey],
                 'Content-Type: application/json',
                 'HTTP-Referer: ' . ($cfg['OPENROUTER_REFERER'] ?? 'https://example.com'),
                 'X-Title: ' . ($cfg['OPENROUTER_TITLE'] ?? 'llm_connector'),
@@ -917,6 +919,7 @@ final class ToolkitLLM {
         $primaryProvider = $primary['provider'] ?? 'openrouter';
         $candidates = [$primary];
         $skipped = [];
+        $hasGR = !empty($cfg['GENROUTER_API_KEY']);
         $hasOR = !empty($cfg['OPENROUTER_API_KEY']);
         $hasYA = !empty($cfg['YANDEX_API_KEY']) && !empty($cfg['YANDEX_FOLDER_ID']);
         $drop = static function (array $row, string $why) use (&$skipped): void {
@@ -932,6 +935,7 @@ final class ToolkitLLM {
         if ($vision) $named = array_merge($named, self::visionModelRows());
         foreach ($named as $row) {
             $prov = $row['provider'] ?? 'openrouter';
+            if ($prov === 'genrouter' && !$hasGR) continue;
             if ($prov === 'openrouter' && !$hasOR) continue;
             if ($prov === 'yandex' && !$hasYA) continue;
             // A slug never travels to the other provider: the row keeps its own.
@@ -942,10 +946,12 @@ final class ToolkitLLM {
         }
 
         $fallbackModels = [
+            'genrouter' => (string)($cfg['GENROUTER_MODEL'] ?? ''),
             'openrouter' => (string) ($cfg['LLM_FALLBACK_MODEL'] ?? 'openrouter/auto'),
             'yandex'     => (string) ($cfg['YANDEX_FALLBACK_MODEL'] ?? 'yandexgpt-5-lite'),
         ];
         foreach (self::providerPriority() as $prov) {
+            if ($prov === 'genrouter' && !$hasGR) continue;
             if ($prov === 'openrouter' && !$hasOR) continue;
             if ($prov === 'yandex' && !$hasYA) continue;
             $fbModel = $fallbackModels[$prov] ?? '';
@@ -1425,3 +1431,4 @@ final class ToolkitLLM {
 if (!class_exists('LLM', false)) {
     class_alias(ToolkitLLM::class, 'LLM');
 }
+
