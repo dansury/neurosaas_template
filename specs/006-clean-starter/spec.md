@@ -18,6 +18,17 @@ A developer or AI agent can identify the instructions, module contracts and publ
 - FR-005: Root instructions establish neutral UI, standalone installation, cohesive modules, meaningful API documentation and synchronized specifications as ongoing development requirements.
 - FR-006: The README explains the purposes of `CLAUDE.MD`, `AGENTS.md`, module READMEs, specifications and tests, and gives a short reading order. Documents describe actual behavior and are maintained with code.
 
+## Original template attribution acceptance (FR-004)
+
+1. Given a README rewrite, project rename, or rebranding, when the change is
+   delivered, the rendered root README still credits the original template
+   with a Markdown link to `https://github.com/dansury/neurosaas_template/`.
+2. Given only a `Use this template` link ending in `/generate`, a plain-text
+   URL, an HTML comment, or a code example, attribution is not satisfied;
+   the source must be a visible Markdown link in ordinary README prose.
+3. Given routine documentation changes without an explicit request to remove
+   attribution, repository checks reject removal of the original link.
+
 ## Edge cases
 
 - A hosting account without working mail needs actionable SMTP or hosting-mail setup; email verification is never bypassed.

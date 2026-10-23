@@ -21,6 +21,7 @@ jobs:
       - run: php tests/feedback_speech.php
       - run: php tests/webapp.php
       - run: python3 tests/pull_python.py
+      - run: python3 tests/template_attribution.py
       - run: for file in admin/llm_connector/tests/*.php; do php "$file" || exit 1; done
       - run: python3 tests/http_test.py
       - run: python3 tests/toolkit_http.py
