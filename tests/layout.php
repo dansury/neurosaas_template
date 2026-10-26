@@ -38,4 +38,6 @@ catch (RuntimeException $e) { verifyLayout(true, 'shared hourly delivery limit')
 $_SERVER['SCRIPT_NAME'] = '/nested/admin/index.php';
 define('NEUROSAAS_ADMIN', true);
 verifyLayout(auth_cookie_path() === '/nested/', 'shared admin/cron cookie path');
+$_SERVER['SCRIPT_NAME'] = '/admin/index.php';
+verifyLayout(auth_cookie_path() === '/', 'root admin cookie path on Windows and Unix');
 echo "$checks layout and account checks passed\n";

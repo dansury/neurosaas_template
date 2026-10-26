@@ -20,7 +20,7 @@ checks = 0
 def expect(ok, label):
     global checks
     checks += 1
-    assert ok, label
+    assert ok, (label, globals().get('status'), globals().get('html', globals().get('page', ''))[:400])
 
 with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
     work = Path(folder)
@@ -75,8 +75,8 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
         return r.status, r.read().decode()
     def csrf(html):
         return re.search(r'name="csrf" value="([a-f0-9]+)"', html).group(1)
-    def send_fields(token, email="owner@example.test", pwd="confirmed-password"):
-        return dict(csrf=token, account_action="send", email=email,
+    def send_fields(token, email="owner@example.test", pwd="confirmed-password", action="create"):
+        return dict(csrf=token, account_action=action, email=email,
                     account_password=pwd, account_password_confirm=pwd)
     try:
         for _ in range(80):
@@ -96,38 +96,37 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
         expect(status == 200 and "Создайте учётную запись" in html, "authenticated owner sees enrollment")
         token = csrf(html)
         status, html = request("/pull.php?check=1&plain=1&toolkit=1")
-        expect(status == 200 and "Создайте учётную запись" in html and "SMTP host" not in html, "settings blocked until email confirmation")
-        status, _ = request(data=dict(account_action="send", email="owner@example.test"))
+        expect(status == 200 and "Создайте учётную запись" in html and "SMTP host" not in html, "settings blocked until account creation")
+        status, _ = request(data=dict(account_action="create", email="owner@example.test"))
         expect(status == 403 and not (work / "mail.json").exists(), "account CSRF required")
         status, _ = request(data=send_fields(token, pwd="short"))
         expect(status == 200 and not (work / "mail.json").exists(), "weak password never sent")
+        expect("Создать администратора" in html and 'name="code"' not in html, "initial form requires no email code")
+        status, html = request(data=send_fields(token, email="invalid"))
+        expect("Введите корректный email" in html, "invalid email rejected")
+        fields = send_fields(token)
+        fields["account_password_confirm"] = "different-password"
+        status, html = request(data=fields)
+        expect("одинаковый пароль" in html, "mismatched passwords rejected")
         (work / "fail-mail").touch()
         status, html = request(data=send_fields(token))
-        expect(status == 200 and "Не удалось отправить письмо" in html and not (work / "mail.json").exists(), "mail failure keeps management closed with an actionable message")
-        expect("'admin_email_verified'" not in (work / "pull-config.php").read_text(), "failed delivery never verifies account")
-        (work / "fail-mail").unlink()
-        status, html = request(data=send_fields(token))
-        mail = json.loads((work / "mail.json").read_text())
-        expect(status == 200 and re.fullmatch(r"[0-9]{6}", mail["code"]), "enrollment sends a six-digit code")
-        expect(mail["code"] not in html and "confirmed-password" not in html, "code and password absent from HTML")
-        state = work / "admin/account/data/state.php"
-        expect(mail["code"] not in state.read_text() and state.stat().st_mode & 0o777 == 0o600, "private hashed challenge")
-        status, html = request(data=send_fields(token))
-        expect("Подождите минуту" in html, "persistent resend cooldown")
-        status, html = request(data=dict(csrf=token, account_action="verify", code="000000"))
-        expect("Код неверный" in html, "wrong code rejected")
-        stranger = browser()
-        _, stranger_html = request("/admin/?account=reset", selected=stranger)
-        status, stranger_html = request("/admin/?account=reset",
-            dict(csrf=csrf(stranger_html), account_action="verify", code=mail["code"]), stranger)
-        expect("Код неверный" in stranger_html, "another browser cannot use enrollment code")
-        status, html = request(data=dict(csrf=token, account_action="verify", code=mail["code"]))
-        expect(status == 401 and "Вход в управление" in html, "confirmation requires new login")
+        expect(status == 401 and "Вход в управление" in html and not (work / "mail.json").exists(), "initial account works with unavailable SMTP and requires new login")
         raw = (work / "pull-config.php").read_text()
-        expect("'admin_email_verified' => true" in raw and "owner@example.test" in raw and "confirmed-password" not in raw, "verified email and password hash persisted")
-        token = csrf(html)
-        status, html = request(data=dict(csrf=token, password="confirmed-password"))
+        expect("'admin_account_created' => true" in raw and "'admin_email_verified' => false" in raw and "owner@example.test" in raw and "confirmed-password" not in raw, "enrollment stores hash without claiming email verification")
+        state = work / "admin/account/data/state.php"
+        expect("challenge" not in state.read_text(), "enrollment leaves no email challenge")
+        status, html = request(data=dict(csrf=csrf(html), password=password))
+        expect(status == 401, "previous installation password invalidated")
+        status, html = request(data=dict(csrf=csrf(html), password="confirmed-password"))
         expect(status == 200 and "Управление сервисом" in html, "new password grants dashboard")
+        saved_config = (work / "pull-config.php").read_text()
+        status, html = request(data=send_fields(csrf(html), email="attacker@example.test"))
+        expect((work / "pull-config.php").read_text() == saved_config, "created account cannot be overwritten")
+        failed_recovery = browser()
+        _, page = request("/admin/?account=reset", selected=failed_recovery)
+        status, page = request("/admin/?account=reset", send_fields(csrf(page), pwd="replacement-password", action="send"), failed_recovery)
+        expect(status == 200 and "Не удалось отправить письмо" in page and (work / "pull-config.php").read_text() == saved_config, "SMTP failure during recovery preserves existing account")
+        (work / "fail-mail").unlink()
         status, html = request("/pull.php?feedback=1")
         expect(status == 200 and "Идеи для доработки" in html, "legacy browser route reaches authenticated administration")
         status, html = request("/index.php")
@@ -141,14 +140,23 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
         recovery = browser()
         _, html = request("/admin/?account=reset", selected=recovery)
         rt = csrf(html)
-        (work / "mail.json").unlink()
-        status, html = request("/admin/?account=reset", send_fields(rt, "unknown@example.test", "replacement-password"), recovery)
-        expect(status == 200 and "Если адрес подтверждён" in html and not (work / "mail.json").exists(), "unknown reset email gets generic response without mail")
+        (work / "mail.json").unlink(missing_ok=True)
+        status, html = request("/admin/?account=reset", send_fields(rt, "unknown@example.test", "replacement-password", action="send"), recovery)
+        expect(status == 200 and "Если адрес зарегистрирован" in html and not (work / "mail.json").exists(), "unknown reset email gets generic response without mail")
         subprocess.check_call([PHP, "-r",
             "$p=$argv[1];$s=require $p;$s['last_sent']=0;file_put_contents($p,'<?php return '.var_export($s,true).';');", str(state)])
-        status, html = request("/admin/?account=reset", send_fields(rt, pwd="replacement-password"), recovery)
+        status, html = request("/admin/?account=reset", send_fields(rt, pwd="replacement-password", action="send"), recovery)
         reset = json.loads((work / "mail.json").read_text())
-        expect(status == 200 and reset["email"] == "owner@example.test", "recovery sends only to verified email")
+        expect(status == 200 and reset["email"] == "owner@example.test", "recovery sends to enrolled email")
+        expect(reset["code"] not in html and reset["code"] not in state.read_text(), "recovery code absent from HTML and stored only hashed")
+        _, html = request("/admin/?account=reset", send_fields(rt, pwd="replacement-password", action="send"), recovery)
+        expect("Подождите минуту" in html, "persistent resend cooldown")
+        stranger = browser()
+        _, stranger_html = request("/admin/?account=reset", selected=stranger)
+        _, stranger_html = request("/admin/?account=reset", dict(csrf=csrf(stranger_html), account_action="verify", code=reset["code"]), stranger)
+        expect("Код неверный" in stranger_html, "another browser cannot use recovery code")
+        _, html = request("/admin/?account=reset", dict(csrf=rt, account_action="verify", code="invalid"), recovery)
+        expect("Код неверный" in html, "wrong recovery code rejected")
         status, html = request("/admin/?account=reset",
             dict(csrf=rt, account_action="verify", code=reset["code"]), recovery)
         expect(status == 401, "reset completed without auto login")
