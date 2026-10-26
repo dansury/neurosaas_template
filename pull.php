@@ -1042,7 +1042,7 @@ function auth_cookie_clear(): void {
 function auth_cookie_path(): string {
     if (defined('NEUROSAAS_ADMIN')) {
         $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? '/admin/index.php'));
-        return rtrim(dirname(dirname($script)), '/.') . '/';
+        return rtrim(str_replace('\\', '/', dirname(dirname($script))), '/.') . '/';
     }
     $dir = str_replace('\\', '/', dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/pull.php')));
     return ($dir === '' || $dir === '.' || $dir === '/') ? '/' : rtrim($dir, '/') . '/';
@@ -1067,10 +1067,10 @@ function is_local_install(array $config): bool {
 function render_local_setup(array $values, array $errors): void {
     page_start(ui('Files are already uploaded', 'Файлы уже загружены'));
     render_workflow_diagram();
-    echo '<p>' . ui('Use the same administration without GitHub downloads. Email verification is still required. AI, mail and sending issues need their own network connections.', 'Откройте ту же админку без скачивания с GitHub. Подтверждение email остаётся обязательным. Для AI, почты и отправки задач нужен доступ к соответствующим сервисам.') . '</p>';
+    echo '<p>' . ui('Use the same administration without GitHub downloads. The first administrator needs no email confirmation. AI, mail and sending issues need their own network connections.', 'Откройте ту же админку без скачивания с GitHub. Первый администратор создаётся без подтверждения email. Для AI, почты и отправки задач нужен доступ к соответствующим сервисам.') . '</p>';
     foreach ($errors as $error) echo '<p class="notice error">' . h(setup_error($error)) . '</p>';
     echo '<section><form method="post">' . csrf_field() . '<input type="hidden" name="installation_mode" value="local">';
-    echo '<p>Дополнительный пароль установки не нужен. Далее создайте учётную запись администратора и подтвердите email.</p>';
+    echo '<p>Дополнительный пароль установки не нужен. Далее создайте учётную запись администратора. Подтверждение email не требуется.</p>';
     field('timezone', ui('Time zone', 'Часовой пояс'), $values['timezone'] ?? 'Europe/Moscow');
     echo '<button>' . ui('Open administration', 'Перейти к настройке админки') . '</button></form><p><a href="?">' . ui('Install from GitHub instead', 'Установка из GitHub') . '</a></p></section>';
     page_end();
@@ -1221,7 +1221,7 @@ function page_start(string $title): void {
     echo '<!doctype html><html lang="' . h($GLOBALS['pull_language']) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>' . h($title) . '</title>' . terminal_css() . '</head><body><main><header><a class="brand" href="?">' . ui('Your service', 'Ваш сервис') . ' <small>' . ui('control panel', 'панель управления') . '</small></a><nav><a href="?feedback=1">Заказать доработку</a> · <a href="?lang=ru">Русский</a> · <a href="?lang=en">English</a> · <a href="' . (defined('NEUROSAAS_ADMIN') ? '../' : './') . '">' . ui('Open service', 'Открыть сервис') . '</a></nav></header><h1>' . h($title) . '</h1>';
 }
 function page_end(): void {
-    feedback_dialog();
+
     echo '<footer>' . ui('Need advice or a custom improvement?', 'Нужна консультация или доработка?') . ' <a href="https://dansury.github.io" target="_blank" rel="noopener">dansury.github.io</a> · <a href="https://t.me/dansury.vj" target="_blank" rel="noopener">Telegram: dansury.vj</a></footer></main></body></html>';
 }
 function terminal_css(): string {
@@ -1286,7 +1286,7 @@ function setup_error(string $message): string {
     return ui($message, $map[$message] ?? $message);
 }
 function render_setup_done(array $config): void {
-    if (is_local_install($config)) { page_start(ui('Local setup saved', 'Локальная установка настроена')); echo '<section><p>' . ui('Files are ready. Sign in with the installation password, then verify your email.', 'Файлы готовы. Создайте учётную запись администратора и подтвердите email.') . '</p><a class="button" href="?">' . ui('Continue to administration', 'Продолжить настройку админки') . '</a><p><a href="../">' . ui('Open site', 'Открыть сайт') . '</a></p></section>'; page_end(); return; }
+    if (is_local_install($config)) { page_start(ui('Local setup saved', 'Локальная установка настроена')); echo '<section><p>' . ui('Files are ready. Create the administrator account without email confirmation.', 'Файлы готовы. Создайте учётную запись администратора без подтверждения email.') . '</p><a class="button" href="?">' . ui('Continue to administration', 'Продолжить настройку админки') . '</a><p><a href="../">' . ui('Open site', 'Открыть сайт') . '</a></p></section>'; page_end(); return; }
     page_start(ui('Your connection is ready', 'Подключение настроено'));
     echo '<section><p>' . ui('Settings saved. Open the panel to install your first version and set up AI connections.', 'Настройки сохранены. Откройте панель, чтобы установить первую версию и подключить нейросети.') . '</p><a class="button" href="?">' . ui('Open control panel', 'Открыть панель') . '</a></section>'; page_end();
 }
@@ -1779,13 +1779,7 @@ f.addEventListener('paste',e=>{const images=[...e.clipboardData.files].filter(x=
 btn.addEventListener('click',async()=>{if(rec&&rec.state==='recording'){rec.stop();return;}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true}),chunks=[];rec=new MediaRecorder(stream);const started=Date.now();rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};rec.onstop=async()=>{clearInterval(timer);stream.getTracks().forEach(x=>x.stop());btn.disabled=true;status.textContent='Распознаём…';const data=new FormData();data.set('action','feedback_transcribe');data.set('csrf',f.querySelector('[name=csrf]').value);data.set('audio',new Blob(chunks,{type:rec.mimeType}),'voice.webm');try{const res=await fetch('?',{method:'POST',body:data}),d=await res.json();if(!res.ok||d.error)throw Error(d.error||'Ошибка распознавания');body.value+=(body.value?'\n':'')+d.text;body.dispatchEvent(new Event('input',{bubbles:true}));status.textContent=d.warning||'Расшифровка добавлена.'}catch(e){status.textContent=e.message}finally{btn.disabled=false;btn.textContent='Надиктовать'}};rec.start();btn.textContent='Остановить';timer=setInterval(()=>{const left=Math.max(0,30-Math.floor((Date.now()-started)/1000));status.textContent='Осталось секунд: '+left;if(!left&&rec.state==='recording')rec.stop()},300)}catch(e){status.textContent='Для записи нужен HTTPS и доступ к микрофону.'}});})();</script>
 HTML;
 }
-function feedback_dialog(): void {
-    if(isset($_GET['embedded']))return;
-    echo <<<'HTML'
-<dialog id="change-dialog" style="position:fixed;inset:auto;left:4vw;top:8vh;margin:0;width:min(800px,92vw);height:80vh;padding:0;border:1px solid #aaa;border-radius:12px"><header id="change-drag" tabindex="0" aria-label="Переместить окно стрелками или перетащить" style="cursor:move;touch-action:none;padding:12px;margin:0;background:#eee"><strong>Заказать доработку · перетащите за эту полосу</strong><button type="button" onclick="document.getElementById('change-dialog').close()">×</button></header><iframe title="Идеи для доработки" style="border:0;width:100%;height:calc(100% - 70px)"></iframe></dialog>
-<script>(()=>{const d=document.getElementById('change-dialog'),handle=document.getElementById('change-drag');document.querySelectorAll('a[href="?feedback=1"]').forEach(a=>a.addEventListener('click',e=>{if(typeof d.showModal!=='function')return;e.preventDefault();const frame=d.querySelector('iframe');if(!frame.src)frame.src='?feedback=1&embedded=1';d.showModal()}));let origin;const move=(x,y)=>{d.style.left=Math.max(0,Math.min(innerWidth-d.offsetWidth,x))+'px';d.style.top=Math.max(0,Math.min(innerHeight-d.offsetHeight,y))+'px'};handle.addEventListener('pointerdown',e=>{if(e.target.closest('button'))return;const r=d.getBoundingClientRect();origin={x:e.clientX,y:e.clientY,left:r.left,top:r.top};handle.setPointerCapture(e.pointerId)});handle.addEventListener('pointermove',e=>{if(origin)move(origin.left+e.clientX-origin.x,origin.top+e.clientY-origin.y)});handle.addEventListener('pointerup',()=>origin=null);handle.addEventListener('pointercancel',()=>origin=null);handle.addEventListener('keydown',e=>{const delta={ArrowLeft:[-10,0],ArrowRight:[10,0],ArrowUp:[0,-10],ArrowDown:[0,10]}[e.key];if(delta){e.preventDefault();const r=d.getBoundingClientRect();move(r.left+delta[0],r.top+delta[1])}})})();</script>
-HTML;
-}
+
 
 /** Keep the original host adapter and advanced toolkit on the same GenRouter key. */
 function sync_genrouter_toolkit(array $cfg): void {

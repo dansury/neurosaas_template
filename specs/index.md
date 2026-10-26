@@ -1,5 +1,7 @@
 # NeuroSaaS specifications
 
+- [First administrator without mail](012-first-admin/spec.md): immediate initial enrollment, protected email recovery and direct feedback navigation.
+
 - [Installable application and notifications](010-webapp/spec.md): reusable PWA, private owner-device subscriptions and dependency-free Web Push.
 
 - [Feedback dictation](009-feedback-dictation/spec.md): readable transcripts, protected facts and recoverable provider errors.

@@ -112,16 +112,24 @@ final class AdminAccount
         return !empty($raw['admin_email_verified']) && filter_var($raw['admin_email'] ?? '', FILTER_VALIDATE_EMAIL);
     }
 
+    /** Enrollment grants management access; email ownership is proved separately by recovery. */
+    public static function enrolled(string $configPath): bool
+    {
+        $raw = require $configPath;
+        return (!empty($raw['admin_account_created']) || !empty($raw['admin_email_verified']))
+            && filter_var($raw['admin_email'] ?? '', FILTER_VALIDATE_EMAIL)
+            && !empty($raw['password_hash']);
+    }
+
     public static function gate(string $configPath, bool $reset = false): void
     {
-        if (!$reset && self::verified($configPath)) return;
-        $purpose = $reset ? 'reset' : 'enroll';
+        if (!$reset && self::enrolled($configPath)) return;
         $message = '';
         $error = false;
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             $action = (string)($_POST['account_action'] ?? '');
             try {
-                if ($action === 'send') {
+                if ((!$reset && $action === 'create') || ($reset && $action === 'send')) {
                     $email = strtolower(trim((string)($_POST['email'] ?? '')));
                     $password = (string)($_POST['account_password'] ?? '');
                     $confirm = (string)($_POST['account_password_confirm'] ?? '');
@@ -132,31 +140,45 @@ final class AdminAccount
                         throw new \RuntimeException('Введите одинаковый пароль дважды: от 12 до 512 символов.');
                     }
                     $hash = password_hash($password, PASSWORD_DEFAULT);
-                    self::transaction(static function (array &$state) use ($configPath, $reset, $purpose, $email, $hash): void {
+                    self::transaction(static function (array &$state) use ($configPath, $reset, $email, $hash): void {
                         $raw = require $configPath;
-                        if (!$reset && !empty($raw['admin_email_verified'])) {
-                            throw new \RuntimeException('Учётная запись уже создана. Войдите с паролем.');
+                        if (!$reset) {
+                            if (self::enrolled($configPath)) {
+                                throw new \RuntimeException('Учётная запись уже создана. Войдите с паролем.');
+                            }
+                            $raw['admin_email'] = $email;
+                            $raw['admin_account_created'] = true;
+                            $raw['admin_email_verified'] = false;
+                            $raw['password_hash'] = $hash;
+                            if (!\save_php_config($configPath, $raw)) {
+                                throw new \RuntimeException('Не удалось сохранить учётную запись. Повторите создание.');
+                            }
+                            unset($state['challenge']);
+                            return;
                         }
-                        $known = !$reset || (!empty($raw['admin_email_verified'])
-                            && hash_equals(strtolower((string)($raw['admin_email'] ?? '')), $email));
-                        self::issue($state, $purpose, $email, $hash, session_id(),
+                        $known = self::enrolled($configPath)
+                            && hash_equals(strtolower((string)($raw['admin_email'] ?? '')), $email);
+                        self::issue($state, 'reset', $email, $hash, session_id(),
                             static function (string $to, string $code) use ($known): void {
                                 if ($known) self::deliver($to, $code);
                             });
-                        // Unknown reset addresses receive no usable challenge.
                         if (!$known) unset($state['challenge']);
                     });
-                    $message = $reset ? 'Если адрес подтверждён в этом сервисе, мы отправили код. Введите его ниже.'
-                        : 'Письмо отправлено. Введите шестизначный код ниже. Проверьте также папку «Спам».';
-                } elseif ($action === 'verify') {
-                    $accepted = self::transaction(static function (array &$state) use ($configPath, $purpose): bool {
-                        $challenge = self::consume($state, $purpose, trim((string)($_POST['code'] ?? '')), session_id());
+                    if (!$reset) {
+                        \auth_cookie_clear();
+                        session_regenerate_id(true);
+                        $_SESSION['pull_csrf'] = bin2hex(random_bytes(24));
+                        header('Location: ?account_done=1', true, 303);
+                        exit;
+                    }
+                    $message = 'Если адрес зарегистрирован в этом сервисе, мы отправили код. Введите его ниже.';
+                } elseif ($reset && $action === 'verify') {
+                    $accepted = self::transaction(static function (array &$state) use ($configPath): bool {
+                        $challenge = self::consume($state, 'reset', trim((string)($_POST['code'] ?? '')), session_id());
                         if ($challenge === null) return false;
                         $raw = require $configPath;
-                        if ($purpose === 'enroll' && !empty($raw['admin_email_verified'])) return false;
-                        if ($purpose === 'reset' && (empty($raw['admin_email_verified'])
-                            || !hash_equals(strtolower((string)($raw['admin_email'] ?? '')), $challenge['email']))) return false;
-                        $raw['admin_email'] = $challenge['email'];
+                        if (!self::enrolled($configPath)
+                            || !hash_equals(strtolower((string)($raw['admin_email'] ?? '')), $challenge['email'])) return false;
                         $raw['admin_email_verified'] = true;
                         $raw['password_hash'] = $challenge['password_hash'];
                         if (!\save_php_config($configPath, $raw)) {
@@ -180,16 +202,22 @@ final class AdminAccount
             }
         }
         \page_start($reset ? 'Восстановление пароля' : 'Создайте учётную запись администратора');
-        echo '<section><p>Укажите email и новый пароль. Доступ к управлению откроется после подтверждения email кодом из письма.</p>';
+        echo '<section><p>' . ($reset
+            ? 'Укажите email учётной записи и новый пароль. Для восстановления доступа потребуется код из письма.'
+            : 'Укажите email и пароль. Первый администратор создаётся без письма и кода подтверждения. После создания войдите с новым паролем. SMTP можно настроить в админке; он понадобится для восстановления пароля.') . '</p>';
         if ($message !== '') echo '<p role="status" class="notice ' . ($error ? 'error' : 'success') . '">' . \h($message) . '</p>';
-        echo '<form method="post">' . \csrf_field() . '<input type="hidden" name="account_action" value="send">';
-        \field('email', 'Email', '', 'На этот адрес придёт код подтверждения.', 'email');
+        echo '<form method="post">' . \csrf_field() . '<input type="hidden" name="account_action" value="' . ($reset ? 'send' : 'create') . '">';
+        \field('email', 'Email', '', $reset ? 'На этот адрес придёт код восстановления.' : 'Адрес для восстановления доступа после настройки почты.', 'email');
         \field('account_password', 'Новый пароль', '', 'Не менее 12 символов.', 'password');
         \field('account_password_confirm', 'Повторите пароль', '', '', 'password');
-        echo '<button>Отправить код</button></form><form method="post">' . \csrf_field()
-            . '<input type="hidden" name="account_action" value="verify"><label for="account-code">Код из письма</label>'
-            . '<input id="account-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required>'
-            . '<button>Подтвердить</button></form><p><a href="?">Вернуться ко входу</a></p></section>';
+        echo '<button>' . ($reset ? 'Отправить код' : 'Создать администратора') . '</button></form>';
+        if ($reset) {
+            echo '<form method="post">' . \csrf_field()
+                . '<input type="hidden" name="account_action" value="verify"><label for="account-code">Код из письма</label>'
+                . '<input id="account-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required>'
+                . '<button>Подтвердить</button></form>';
+        }
+        echo '<p><a href="?">Вернуться ко входу</a></p></section>';
         \page_end();
         exit;
     }

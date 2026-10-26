@@ -23,7 +23,7 @@ checks = 0
 def expect(ok, label):
     global checks
     checks += 1
-    assert ok, label
+    assert ok, (label, globals().get('status'), globals().get('html', globals().get('page', ''))[:400])
 
 
 fixture = os.environ.get("PREVIEW_FIXTURE")
@@ -131,12 +131,8 @@ echo 'warning fixture';
         status, page = request(data=dict(csrf=csrf(page), password="local-install-password"))
         expect(status == 200 and "Создайте учётную запись" in page, "local mode uses real account enrollment")
         token = csrf(page)
-        status, page = request(data=dict(csrf=token, account_action="send", email="owner@example.test",
-                                        account_password="confirmed-local-password", account_password_confirm="confirmed-local-password"))
-        code = json.loads((work / "mail.json").read_text())["code"]
-        expect(code not in page, "mail code never appears in interface")
-        status, page = request(data=dict(csrf=csrf(page), account_action="verify", code=code))
-        expect(status == 401 and config()["admin_email_verified"], "email confirmation changes password and requires login")
+        status, page = request(data=dict(csrf=token, account_action="create", email="owner@example.test", account_password="confirmed-local-password", account_password_confirm="confirmed-local-password"))
+        expect(status == 401 and config()["admin_account_created"] and not config()["admin_email_verified"] and not (work / "mail.json").exists(), "local enrollment needs no email and requires login")
         status, page = request(data=dict(csrf=csrf(page), password="confirmed-local-password"))
         expect(status == 200 and "Локальная установка" in page and "f_genrouter_key" in page, "same administration and AI panel are available")
         token = csrf(page)
@@ -179,7 +175,7 @@ echo 'warning fixture';
         expect(status == 200 and "Диагностика" not in json.loads((work / "feedback.json").read_text())["body"], "unchecked log is not sent")
         # Isolated fixture: reset only session cooldown, without bypassing product auth/CSRF.
         for session in work.glob("sess_*"):
-            session.write_text(re.sub(r"feedback_at\|i:\d+;", "feedback_at|i:0;", session.read_text()))
+            session.write_bytes(re.sub(rb"feedback_at\|i:\d+;", b"feedback_at|i:0;", session.read_bytes()))
         _, page = request("/admin/?feedback=1")
         token = csrf(page)
         ident, preview = snapshot(page)
@@ -205,6 +201,13 @@ echo 'warning fixture';
         expect(status == 200 and "Создайте учётную запись" in page, "originating browser reaches account enrollment directly")
         status, page = request("/fresh/admin/", selected=browser())
         expect(status == 403, "another browser cannot claim pending installation")
+        _, page = request("/fresh/admin/", selected=fresh_client)
+        status, page = request("/fresh/admin/", dict(csrf=csrf(page), account_action="create", email="fresh@example.test", account_password="fresh-owner-password", account_password_confirm="fresh-owner-password"), selected=fresh_client)
+        expect(status == 401 and "Вход в управление" in page, "fresh bootstrap creates account without email")
+        status, page = request("/fresh/admin/", dict(csrf=csrf(page), password="fresh-owner-password"), selected=fresh_client)
+        expect(status == 200 and "Управление сервисом" in page, "fresh owner reaches settings immediately")
+        status, page = request("/fresh/admin/", selected=browser())
+        expect(status == 401 and "Создайте учётную запись" not in page, "other browsers must authenticate after first creation")
         print(f"{checks} local installation and diagnostics checks passed")
     finally:
         server.terminate()

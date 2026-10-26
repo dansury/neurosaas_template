@@ -29,8 +29,7 @@ credentials. Models are selected from provider-reported capabilities; unknown
 audio/vision support is never presented as verified. Existing saved credentials
 and choices survive upgrades. Cache reset is a small cross next to Refresh.
 
-A top-right change-request control opens a movable dialog with a dedicated drag
-handle, screenshot uploads/paste and recording when an audio model is configured.
+The top-right change-request control navigates directly to the authenticated feedback page, including on hosting that denies framing. The page supports screenshot uploads/paste and recording when an audio model is configured.
 Nothing is submitted until the operator presses Send. Optional diagnostics retain
 their existing explicit consent and frozen preview. The obsolete embedding-tip
 screen and dashboard slogan are removed. The interface uses black accent ink.
