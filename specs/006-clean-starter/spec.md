@@ -31,7 +31,7 @@ A developer or AI agent can identify the instructions, module contracts and publ
 
 ## Edge cases
 
-- A hosting account without working mail needs actionable SMTP or hosting-mail setup; email verification is never bypassed.
+- Initial administrator creation works without mail. Password recovery requires a code sent to the enrolled email; unavailable mail displays actionable SMTP or hosting-mail setup instructions and preserves the existing password.
 - An existing installation retains configuration, reporting consent, module data and rollback support.
 - Explicit future developer instructions may change product design or remove attribution; ordinary rebranding does not imply permission to remove the original link.
 
