@@ -20,6 +20,10 @@ After a first successful submission in a browser session, the UI displays one co
 
 Provider settings stay collapsed by default, with GenRouter first and expanded initially. Its card links directly to its API-key page and explains the key, model, and fallback order. All cards distinguish an API used by an already deployed service from the separate interactive coding subscription required to build that service. Saved provider order is validated server-side and disabled providers have no execution path.
 
+## Pull-request preview help
+
+The optional pull-request number field explains that a PR proposes changes which have not yet been merged into the main branch. Operators can find its number in the repository's Pull requests tab or at the end of a URL such as `https://github.com/owner/repository/pull/42`. Entering `42` installs the current changes from that PR in the selected repository instead of the branch. Use a separate test installation: preview is an actual deployment, can contain unfinished code, and changes files in this installation. Ordinary installation and updates leave the field empty. Private repositories need Pull requests: Read permission. After testing, clear `pr_number` in `pull-config.php` to return to branch updates, including after merge or closure.
+
 ## Verification
 
 Offline HTTP tests cover Russian default language, least-privilege PAT URL construction, password replacement, optional feedback title, one-time congratulations, and GenRouter-first rendering. No test creates an issue, sends mail, or performs a billed AI request.
