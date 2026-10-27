@@ -24,6 +24,10 @@ Development request links open the authenticated feedback page directly, so host
 - FR-004 (US2): Recovery MUST require the existing bounded email challenge, including for accounts created without verification.
 - FR-005 (US3): Public and administration feedback links MUST navigate to the feedback route without an iframe.
 - FR-006 (US1): Installer instructions and account UI MUST explain immediate creation and later SMTP configuration.
+- FR-007 (US1): Password length and password mismatch MUST produce separate,
+  accurate errors; the initial-enrollment form MUST NOT offer an email-code action.
+- FR-008 (US3): Development-request controls MUST be ordinary links to the
+  authenticated feedback page, with no iframe, draggable strip or framing hint.
 
 ## Success Criteria
 Offline HTTP tests demonstrate creation with a failing mail stub, protected recovery, legacy authentication and fresh-install browser ownership. Browser tests demonstrate feedback navigation at desktop and mobile widths with framing denied.

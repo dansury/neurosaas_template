@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace NeuroSaaS;
 
 // This module is reached only through the host's IP, session and CSRF gates.
-if (!defined('NEUROSAAS_ADMIN') && !defined('PULL_LIBRARY_ONLY')) {
+if (!defined('NEUROSAAS_ADMIN') && !defined('PULL_LIBRARY_ONLY') && !defined('PULL_ACCOUNT_HOST')) {
     http_response_code(404);
     exit;
 }
@@ -136,8 +136,11 @@ final class AdminAccount
                     if (!filter_var($email, FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/', $email)) {
                         throw new \RuntimeException('Введите корректный email.');
                     }
-                    if (strlen($password) < 12 || strlen($password) > 512 || !hash_equals($password, $confirm)) {
-                        throw new \RuntimeException('Введите одинаковый пароль дважды: от 12 до 512 символов.');
+                    if (!hash_equals($password, $confirm)) {
+                        throw new \RuntimeException('Пароли не совпадают. Введите одинаковый пароль в оба поля.');
+                    }
+                    if (strlen($password) < 12 || strlen($password) > 512) {
+                        throw new \RuntimeException('Пароль должен содержать от 12 до 512 символов.');
                     }
                     $hash = password_hash($password, PASSWORD_DEFAULT);
                     self::transaction(static function (array &$state) use ($configPath, $reset, $email, $hash): void {

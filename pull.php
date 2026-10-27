@@ -64,15 +64,7 @@ if (!defined('PULL_SKIP_PREFLIGHT')) {
         exit;
     }
 }
-// Once installed, all interactive controls are mounted under admin/.
-if (!defined('NEUROSAAS_ADMIN') && is_file(PULL_ROOT . '/admin/index.php')
-    && !(($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET'
-        && isset($_GET['check'], $_GET['plain'])
-        && array_diff(array_keys($_GET), ['check', 'plain']) === [])) {
-    $query = (string)($_SERVER['QUERY_STRING'] ?? '');
-    header('Location: admin/' . ($query !== '' ? '?' . $query : ''), true, 307);
-    exit;
-}
+// The standalone installer remains an authenticated management entry point after installation.
 init_panel();
 if (is_file(PULL_ROOT . '/admin/llm_connector/diagnostics.php')) {
     require_once PULL_ROOT . '/admin/llm_connector/diagnostics.php';
@@ -125,10 +117,14 @@ if ($denied !== null) {
 
 $mode = isset($_GET['status']) ? 'json' : ($plain ? 'plain' : 'html');
 
+$accountGateAvailable = is_file(PULL_ROOT . '/admin/account/gate.php');
 if (defined('NEUROSAAS_ADMIN')) {
     require_once PULL_ROOT . '/admin/llm_connector/migrate.php';
     try { \NeuroSaaS\LayoutMigration::run(); }
     catch (Throwable $e) { http_response_code(503); page_start('Обновление настроек'); echo '<p>' . h($e->getMessage()) . '</p>'; page_end(); exit; }
+}
+if ($accountGateAvailable) {
+    if (!defined('PULL_ACCOUNT_HOST')) define('PULL_ACCOUNT_HOST', true);
     require_once PULL_ROOT . '/admin/account/gate.php';
     if (($_GET['account'] ?? '') === 'reset') \NeuroSaaS\AdminAccount::gate($configPath, true);
 }
@@ -136,15 +132,14 @@ if (defined('NEUROSAAS_ADMIN')) {
 if ($config['password_hash'] !== '') {
     require_auth($config['password_hash'], $mode);
 }
-
-if (defined('NEUROSAAS_ADMIN')) {
+if ($accountGateAvailable) {
     \NeuroSaaS\AdminAccount::gate($configPath);
-        if (isset($_GET['webapp'])) {
-            if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['password'])) { header('Location: ?webapp=1', true, 303); exit; }
-            require_once PULL_ROOT . '/admin/webapp/controller.php';
-            \NeuroSaaS\webapp_admin((string)$_SESSION['pull_csrf'], (string)($config['admin_email'] ?? ''));
-            exit;
-        }
+}
+if (defined('NEUROSAAS_ADMIN') && isset($_GET['webapp'])) {
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['password'])) { header('Location: ?webapp=1', true, 303); exit; }
+    require_once PULL_ROOT . '/admin/webapp/controller.php';
+    \NeuroSaaS\webapp_admin((string)$_SESSION['pull_csrf'], (string)($config['admin_email'] ?? ''));
+    exit;
 }
 if (isset($_GET['toolkit'])) {
     // Never let the standalone module interpret the login POST as a settings save.

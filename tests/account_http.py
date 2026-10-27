@@ -95,19 +95,25 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
         status, html = request(data=dict(csrf=token, password=password))
         expect(status == 200 and "Создайте учётную запись" in html, "authenticated owner sees enrollment")
         token = csrf(html)
-        status, html = request("/pull.php?check=1&plain=1&toolkit=1")
-        expect(status == 200 and "Создайте учётную запись" in html and "SMTP host" not in html, "settings blocked until account creation")
+        standalone = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        status, html = request("/pull.php?check=1&plain=1&toolkit=1", selected=standalone)
+        expect(status == 401 and "SMTP host" not in html,
+               "standalone mixed route remains authenticated before account creation")
         status, _ = request(data=dict(account_action="create", email="owner@example.test"))
         expect(status == 403 and not (work / "mail.json").exists(), "account CSRF required")
-        status, _ = request(data=send_fields(token, pwd="short"))
-        expect(status == 200 and not (work / "mail.json").exists(), "weak password never sent")
+        status, html = request(data=send_fields(token, pwd="short"))
+        expect(status == 200 and "от 12 до 512" in html and "не совпадают" not in html
+               and not (work / "mail.json").exists(), "weak password has an accurate error and is never sent")
         expect("Создать администратора" in html and 'name="code"' not in html, "initial form requires no email code")
         status, html = request(data=send_fields(token, email="invalid"))
         expect("Введите корректный email" in html, "invalid email rejected")
         fields = send_fields(token)
         fields["account_password_confirm"] = "different-password"
         status, html = request(data=fields)
-        expect("одинаковый пароль" in html, "mismatched passwords rejected")
+        expect("Пароли не совпадают" in html and "от 12 до 512" not in html,
+               "mismatched passwords have a distinct error")
         (work / "fail-mail").touch()
         status, html = request(data=send_fields(token))
         expect(status == 401 and "Вход в управление" in html and not (work / "mail.json").exists(), "initial account works with unavailable SMTP and requires new login")
@@ -127,8 +133,15 @@ with tempfile.TemporaryDirectory(prefix="neurosaas-account-http-") as folder:
         status, page = request("/admin/?account=reset", send_fields(csrf(page), pwd="replacement-password", action="send"), failed_recovery)
         expect(status == 200 and "Не удалось отправить письмо" in page and (work / "pull-config.php").read_text() == saved_config, "SMTP failure during recovery preserves existing account")
         (work / "fail-mail").unlink()
-        status, html = request("/pull.php?feedback=1")
-        expect(status == 200 and "Идеи для доработки" in html, "legacy browser route reaches authenticated administration")
+        status, html = request("/pull.php", selected=standalone)
+        expect(status == 401 and "Вход в управление" in html,
+               "standalone management has its own authenticated entry")
+        status, html = request("/pull.php", dict(csrf=csrf(html), password="confirmed-password"), standalone)
+        expect(status == 200 and "Управление сервисом" in html,
+               "installed standalone management remains directly accessible")
+        status, html = request("/pull.php?feedback=1", selected=standalone)
+        expect(status == 200 and "Идеи для доработки" in html,
+               "standalone feedback remains directly accessible")
         status, html = request("/index.php")
         expect(status == 200 and 'href="admin/"' in html and "Hello, world!" in html, "public welcome links to admin")
         expect("color-scheme: light" in html and "background: #fff" in html and "NeuroSaaS" not in html, "public welcome uses a neutral white light-theme surface")
