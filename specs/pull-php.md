@@ -52,7 +52,8 @@ preserved standalone installer consistent with its bundled engine.
 
 ## Routes
 
-GET opens management; installed browser routes redirect to admin. The exact GET
+GET always opens the standalone management panel, including after installation;
+administration remains available separately under `admin/`. The exact GET
 check/plain pair remains the cron exception. Status/history/watch are read-only;
 deploy, archive, rollback, preferences, feedback and account changes require POST
 and CSRF. Cron passes a configured password in X-Pull-Password, never in a URL.

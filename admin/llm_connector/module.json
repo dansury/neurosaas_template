@@ -1,6 +1,6 @@
 {
   "module": "llm_connector",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "api_version": "1.0.0",
   "repo": "dansury/neurosaas_template",
   "channel": "main",
