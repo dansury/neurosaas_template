@@ -8,7 +8,7 @@ for(const rel of ['pull.php','admin/deployment/panel.php']){const file=path.join
  return [['sha'=>str_repeat('a',40),'commit'=>['message'=>'Fixture']], ''];
 }`);fs.writeFileSync(file,source)}
 const php=process.env.PHP_BIN||'php';
-fs.writeFileSync(path.join(root,'frame-policy.php'),"<?php header('X-Frame-Options: DENY'); header(\"Content-Security-Policy: frame-ancestors 'none'\");");
+fs.writeFileSync(path.join(root,'frame-policy.php'),"<?php ob_start(static function($html) { header('X-Frame-Options: DENY'); header(\"Content-Security-Policy: frame-ancestors 'none'\"); return $html; });");
 cp.execFileSync(php,['-r',`file_put_contents($argv[1].'/pull-config.php','<?php return '.var_export(['installation_mode'=>'local','repo'=>'','branch'=>'main','password_hash'=>password_hash('fixture-preview-pass',PASSWORD_DEFAULT),'admin_email'=>'owner@example.test','admin_email_verified'=>true,'auto_pull'=>false],true).';');`,root]);
 const zip=path.join(root,'fixture.zip');cp.execFileSync(process.env.PYTHON_BIN||'python3',['-c',"import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'w');z.writestr('project/index.php','<?php echo \"Archive fixture\";');z.close()",zip]);
 fs.mkdirSync(path.join(base,'work'),{recursive:true});

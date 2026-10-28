@@ -6,6 +6,7 @@
 /admin/llm_connector/selfheal/token.local.php
 /admin/llm_connector/.env
 .serena/
+/work/
 __pycache__/
 *.pyc
 

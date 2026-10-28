@@ -19,6 +19,8 @@ jobs:
       - run: php tests/diagnostics.php
       - run: php tests/operator_workflows.php
       - run: php tests/feedback_speech.php
+      - run: php tests/feedback_audio.php
+      - run: php tests/feedback_auth.php
       - run: php tests/webapp.php
       - run: python3 tests/pull_python.py
       - run: python3 tests/template_attribution.py
@@ -45,4 +47,5 @@ jobs:
       - run: npm install --prefix work/browser-tools playwright
       - run: work/browser-tools/node_modules/.bin/playwright install --with-deps chromium
       - run: NODE_PATH="$PWD/work/browser-tools/node_modules" node tests/browser_operator_workflows.cjs
+      - run: NODE_PATH="$PWD/work/browser-tools/node_modules" node tests/browser_feedback.cjs
       - run: NODE_PATH="$PWD/work/browser-tools/node_modules" node tests/browser_webapp.cjs
