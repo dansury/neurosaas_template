@@ -22,7 +22,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
 async function port(){return new Promise(resolve=>{const s=net.createServer();s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});}
 (async()=>{
   const number=await port(),url='http://127.0.0.1:'+number;
-  const server=cp.spawn(php,['-d','opcache.enable_cli=0','-S','127.0.0.1:'+number,'-t',root],{env,stdio:'ignore'});
+  const server=cp.spawn(php,['-d','opcache.enable_cli=0','-d','opcache.enable=0','-S','127.0.0.1:'+number,'-t',root],{env,stdio:'ignore'});
   await new Promise(r=>setTimeout(r,400));const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH,headless:true,args:['--no-sandbox']});
   try {
     for(const width of [1280,390]){

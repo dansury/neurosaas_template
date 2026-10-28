@@ -1200,7 +1200,8 @@ function init_panel(): void {
     if (PHP_SAPI !== 'cli' && session_status() === PHP_SESSION_NONE) {
         $pending = is_file(PULL_ROOT . '/' . CONFIG_FILE) ? require PULL_ROOT . '/' . CONFIG_FILE : [];
         $legacyBootstrap = !empty($pending['bootstrap_session']) && empty($pending['password_hash']);
-        session_name($legacyBootstrap ? 'pull_panel' : 'pull_panel_' . substr(hash('sha256', auth_cookie_path()), 0, 12));
+        $scopedName = 'pull_panel_' . substr(hash('sha256', auth_cookie_path()), 0, 12);
+        session_name($legacyBootstrap && !isset($_COOKIE[$scopedName]) && isset($_COOKIE['pull_panel']) ? 'pull_panel' : $scopedName);
         session_set_cookie_params(['httponly' => true, 'secure' => auth_is_https(), 'samesite' => 'Lax', 'path' => auth_cookie_path()]);
         if (!@session_start()) {
             http_response_code(500);
