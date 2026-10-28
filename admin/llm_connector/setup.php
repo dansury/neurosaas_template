@@ -355,6 +355,14 @@ echo Selfheal\SelfHeal::adminNotice();
 <form method="post" autocomplete="off">
   <input type="hidden" name="action" value="save">
 
+  <h2 id="provider-keys">API-ключи</h2><p>Начните с ключа провайдера, затем выберите модели ниже.</p>
+  <label><span>GenRouter API Key</span><input type="password" name="GENROUTER_API_KEY" placeholder="<?= $h($mask_key($eff('GENROUTER_API_KEY'))) ?>"></label>
+  <details><summary>Подключить дополнительные провайдеры</summary>
+  <label><span>OpenRouter API Key</span><input type="password" name="OPENROUTER_API_KEY" placeholder="<?= $h($mask_key($eff('OPENROUTER_API_KEY'))) ?>"></label>
+  <label><span>Yandex API Key</span><input type="password" name="YANDEX_API_KEY" placeholder="<?= $h($mask_key($eff('YANDEX_API_KEY'))) ?>"></label>
+  <label data-yandex-folder <?= trim((string)$eff('YANDEX_API_KEY')) === '' ? 'hidden' : '' ?>><span>Yandex Folder ID</span><input type="text" name="YANDEX_FOLDER_ID" placeholder="<?= $h($eff('YANDEX_FOLDER_ID')) ?>"></label>
+
+  </details>
   <h2>Провайдер и модели</h2>
   <div class="row">
     <label><span>Провайдер по умолчанию</span>
@@ -463,14 +471,6 @@ echo Selfheal\SelfHeal::adminNotice();
   <label><span>Голосовая модель (GenRouter / OpenRouter)</span>
     <?= $model_select('LLM_AUDIO_MODEL', $eff('LLM_AUDIO_MODEL'), $by_slug, static function(array $m):bool{return !empty($m['audio']);}, '— подключите GenRouter и обновите каталог —') ?>
   </label>
-  <h2>API-ключи</h2>
-  <label><span>GenRouter API Key</span><input type="password" name="GENROUTER_API_KEY" placeholder="<?= $h($mask_key($eff('GENROUTER_API_KEY'))) ?>"></label>
-  <details><summary>Подключить дополнительные провайдеры</summary>
-  <label><span>OpenRouter API Key</span><input type="password" name="OPENROUTER_API_KEY" placeholder="<?= $h($mask_key($eff('OPENROUTER_API_KEY'))) ?>"></label>
-  <label><span>Yandex API Key</span><input type="password" name="YANDEX_API_KEY" placeholder="<?= $h($mask_key($eff('YANDEX_API_KEY'))) ?>"></label>
-  <label><span>Yandex Folder ID</span><input type="text" name="YANDEX_FOLDER_ID" placeholder="<?= $h($eff('YANDEX_FOLDER_ID')) ?>"></label>
-
-  </details>
   <h2>Почта (SMTP)</h2>
   <p>SMTP — подключение почтового сервера для отправки писем из вашего сервиса. Если сервис не отправляет письма, эти поля можно не заполнять. Подтверждение email администратора также может использовать почту хостинга.</p>
   <div class="row">
@@ -591,3 +591,6 @@ function diagCopy(id, btn) {
 </form>
 </body></html>
 
+
+<style>[data-yandex-folder][hidden]{display:none!important}</style>
+<script>(()=>{const key=document.querySelector('[name="YANDEX_API_KEY"]'),folder=document.querySelector('[data-yandex-folder]');if(!key||!folder)return;const saved=<?= json_encode(trim((string)$eff('YANDEX_API_KEY')) !== '') ?>;const update=()=>{folder.hidden=!(saved||key.value.trim());};key.addEventListener('input',update);update();})();</script>

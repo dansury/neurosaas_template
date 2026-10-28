@@ -120,7 +120,7 @@ with tempfile.TemporaryDirectory(prefix='neurosaas-http-') as work:
         status, _ = request('?feedback=1', {'csrf': token, 'action': 'feedback', 'title': 'a', 'description': 'short'})
         expect(status == 422 and not (work / 'feedback-request.json').exists(), 'feedback validation')
         status, html = request('?feedback=1', {'csrf': token, 'action': 'feedback', 'title': '', 'description': 'Expected screen does not load.'})
-        expect(status == 200 and 'Спасибо!' in html and '/issues/42' in html and 'Первая идея уже в репозитории!' in html and 'resolve https://github.com/owner/repo/issues' in html, 'optional-title feedback success and first-idea guidance')
+        expect(status == 200 and 'Спасибо!' in html and '/issues/42' in html and 'Идея уже в репозитории!' in html and 'resolve https://github.com/owner/repo/issues' in html, 'optional-title feedback success and first-idea guidance')
         report = json.loads((work / 'feedback-request.json').read_text())
         expect(report['repo'] == 'owner/repo' and report['title'].startswith('Идея для доработки') and 'FAKE_KEY' not in str(report), 'feedback uses configured repo, default title and no secret in report')
         status, _ = request('?feedback=1', {'csrf': token, 'action': 'feedback', 'title': 'Retry', 'description': 'Expected screen does not load.'})
