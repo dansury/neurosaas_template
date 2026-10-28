@@ -52,6 +52,7 @@ const AUTH_REMEMBER_TTL = 2592000; // "remember me" cookie lifetime: 30 days
 const AUTH_SESSION_TTL  = 43200;   // without "remember me": 12 hours, session cookie
 
 if (defined('PULL_LIBRARY_ONLY')) return;
+if (isset($_GET['feedback_image']) && is_file(PULL_ROOT.'/admin/deployment/feedback-media.php')) { require_once PULL_ROOT.'/admin/deployment/feedback-media.php'; FeedbackMedia::serve((string)$_GET['feedback_image']); }
 if (!defined('PULL_SKIP_PREFLIGHT')) {
     $missing = [];
     if (PHP_VERSION_ID < 70400) $missing[] = 'PHP 7.4+';
@@ -1210,10 +1211,15 @@ function check_csrf(): void {
         page_end(); exit;
     }
 }
+function feedback_dialog_assets(): string {
+    if (!is_file(PULL_ROOT.'/assets/feedback-dialog.js')) return '';
+    $base = defined('NEUROSAAS_ADMIN') ? '../assets/' : 'assets/';
+    return '<link rel="stylesheet" href="'.$base.'feedback-dialog.css"><script defer src="'.$base.'feedback-dialog.js"></script>';
+}
 function page_start(string $title): void {
     header('Content-Type: text/html; charset=utf-8'); header('Cache-Control: no-store');
     header('Referrer-Policy: same-origin'); header('X-Content-Type-Options: nosniff');
-    echo '<!doctype html><html lang="' . h($GLOBALS['pull_language']) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>' . h($title) . '</title>' . terminal_css() . '</head><body><main><header><a class="brand" href="?">' . ui('Your service', 'Ваш сервис') . ' <small>' . ui('control panel', 'панель управления') . '</small></a><nav><a href="?feedback=1">Заказать доработку</a> · <a href="?lang=ru">Русский</a> · <a href="?lang=en">English</a> · <a href="' . (defined('NEUROSAAS_ADMIN') ? '../' : './') . '">' . ui('Open service', 'Открыть сервис') . '</a></nav></header><h1>' . h($title) . '</h1>';
+    echo '<!doctype html><html lang="' . h($GLOBALS['pull_language']) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>' . h($title) . '</title>' . terminal_css() . feedback_dialog_assets() . '</head><body><main><header><a class="brand" href="?">' . ui('Your service', 'Ваш сервис') . ' <small>' . ui('control panel', 'панель управления') . '</small></a><nav><a href="?feedback=1">Заказать доработку</a> · <a href="?lang=ru">Русский</a> · <a href="?lang=en">English</a> · <a href="' . (defined('NEUROSAAS_ADMIN') ? '../' : './') . '">' . ui('Open service', 'Открыть сервис') . '</a></nav></header><h1>' . h($title) . '</h1>';
 }
 function page_end(): void {
 
@@ -1376,7 +1382,7 @@ function feedback_form(): void {
         checkbox('attach_diagnostics', ui('Attach the technical log shown below', 'Приложить технический журнал ниже'), isset($_POST['attach_diagnostics']));
         echo '<input type="hidden" name="diagnostic_snapshot" value="' . h($id) . '"><p class="help">' . ui('Optional. Only this preview is sent with your idea. It contains error types and code locations, without request contents, customer data or keys.', 'Необязательно. Вместе с идеей будет отправлен только этот снимок: типы ошибок и места в коде, без содержимого запросов, данных клиентов и ключей.') . '</p><details><summary>' . ui('Preview diagnostic attachment', 'Посмотреть прикладываемый журнал') . '</summary><textarea readonly rows="10" aria-label="' . ui('Diagnostic attachment preview', 'Предпросмотр журнала') . '">' . h($snapshot) . '</textarea></details>';
     }
-    if (is_local_install($config ?? [])) echo '<p class="notice">' . ui('Connect GitHub in the panel before sending. The text and log remain local until you submit.', 'Для отправки подключите GitHub в панели. До отправки текст и журнал остаются на сервере.') . '</p>';
+    if (is_local_install($config ?? [])) echo '<p class="notice">' . ui('Connect GitHub in the panel before sending. The text and log remain local until you submit.', 'Войдите в GitHub кнопкой выше или попросите администратора настроить серверный ключ обращений и FEEDBACK_GITHUB_REPO. Отправка выполняется только кнопкой ниже.') . '</p>';
     feedback_media_controls();
     echo '<button>' . ui('Send idea', 'Отправить идею') . '</button></form></section>';
 }
@@ -1386,6 +1392,7 @@ function render_feedback(string $message = '', bool $error = false, string $url 
     $issuesUrl = preg_match('~^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$~', $repo) ? 'https://github.com/' . $repo . '/issues' : '';
 
     page_start(ui('Ideas for improvement', 'Идеи для доработки'));
+    if (is_file(PULL_ROOT.'/admin/deployment/feedback-auth.php')) { require_once PULL_ROOT.'/admin/deployment/feedback-auth.php'; FeedbackAuth::controls(); }
     if ($message !== '') echo '<p role="status" class="notice ' . ($error ? 'error' : 'success') . '">' . h($message) . ($url !== '' ? ' <a target="_blank" rel="noopener" href="' . h($url) . '">' . ui('Open created issue', 'Открыть созданную задачу') . '</a>' : '') . '</p>';
     if ($tokenHelp && $repo !== '') echo '<p class="help"><a target="_blank" rel="noopener" href="' . h(pat_url($repo, ($config['source'] ?? '') === 'pr')) . '">' . ui('Create or replace the GitHub access key', 'Создать или заменить ключ доступа GitHub') . '</a></p>';
     if ($celebrate && $issuesUrl !== '') {
@@ -1396,6 +1403,9 @@ function render_feedback(string $message = '', bool $error = false, string $url 
     page_end();
 }
 function send_feedback(array $config, string $token): void {
+    require_once PULL_ROOT.'/admin/deployment/feedback-auth.php';
+    try { $token = FeedbackAuth::token($token); } catch (Throwable $ex) { render_feedback($ex->getMessage(), true); return; }
+    if (($config['repo'] ?? '') === '') $config['repo'] = (string)getenv('FEEDBACK_GITHUB_REPO');
     $title = trim((string)($_POST['title'] ?? ''));
     $body = trim((string)($_POST['description'] ?? ''));
     if ($title === '') $title = 'Идея для доработки — ' . date('Y-m-d H:i');
@@ -1411,7 +1421,7 @@ function send_feedback(array $config, string $token): void {
     }
     if ($token === '') {
         http_response_code(422);
-        render_feedback(ui('Add a GitHub key with Issues: Read and write to pull-config.php or GITHUB_TOKEN on your server.', 'Добавьте ключ GitHub с правом Issues: Read and write в pull-config.php или переменную GITHUB_TOKEN на сервере.'), true, '', false, true);
+        render_feedback(ui('Add a GitHub key with Issues: Read and write to pull-config.php or GITHUB_TOKEN on your server.', 'Для отправки этой формой подключите файл feedback.key в блоке выше или задайте серверный FEEDBACK_GITHUB_TOKEN с правом Issues: write. Кнопка входа позволяет создать задачу непосредственно на GitHub.'), true, '', false, true);
         return;
     }
     if (time() - (int)($_SESSION['feedback_at'] ?? 0) < 60) {
@@ -1460,7 +1470,9 @@ function github_create_feedback(string $repo, string $token, string $title, stri
 function ai_config(): array {
     require_once PULL_ROOT . '/admin/llm_connector/adapter.php';
     $saved = is_file(PULL_ROOT . '/ai-config.php') ? require PULL_ROOT . '/ai-config.php' : [];
-    return array_replace_recursive(LLM::defaults(), is_array($saved) ? $saved : []);
+    $cfg = array_replace_recursive(LLM::defaults(), is_array($saved) ? $saved : []);
+    if (isset($saved['order']) && is_array($saved['order'])) $cfg['order'] = $saved['order'];
+    return $cfg;
 }
 function render_ai_settings(): void {
     echo '<section><h2>' . ui('AI connections', 'Подключение нейросетей') . '</h2><p>' . ui('Connect one or more providers. If the first provider fails, the next configured provider is tried.', 'Подключите одного или нескольких провайдеров. Если первый не ответит, запрос перейдёт к следующему настроенному.') . '</p>';
@@ -1468,7 +1480,13 @@ function render_ai_settings(): void {
     if (!is_file(PULL_ROOT . '/admin/llm_connector/adapter.php')) { echo '<p>' . ui('Install the latest version first to load the AI connection module.', 'Сначала установите актуальную версию, чтобы загрузить модуль подключения нейросетей.') . '</p></section>'; return; }
     $cfg = ai_config();
     echo '<form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="ai">';
-    field('order', ui('Provider order', 'Порядок провайдеров'), implode(', ', $cfg['order']), ui('Comma-separated: genrouter, openrouter, yandex. Disabled providers are skipped.', 'Через запятую: genrouter, openrouter, yandex. Отключённые провайдеры пропускаются.'));
+    echo '<fieldset><legend>Основной и резервные провайдеры</legend><p class="help">При ошибке сервис попробует следующий включённый провайдер с сохранённым ключом.</p>';
+    for ($i=0; $i<3; $i++) {
+        echo '<label for="provider-order-'.$i.'">'.($i===0?'Основной провайдер':'Резерв '.$i).'</label><select id="provider-order-'.$i.'" name="provider_order[]"><option value="">Не использовать</option>';
+        foreach (LLM::PROVIDERS as $provider) echo '<option value="'.h($provider).'"'.(($cfg['order'][$i]??'')===$provider?' selected':'').'>'.h(ucfirst($provider)).'</option>';
+        echo '</select>';
+    }
+    echo '</fieldset>';
     $providers = ['genrouter', 'openrouter', 'yandex'];
     foreach ($providers as $provider) {
         $p = $cfg[$provider];
@@ -1506,7 +1524,8 @@ function handle_panel_post(array $config, string $token): void {
     $action = (string)($_POST['action'] ?? '');
 if (in_array($action, ['github_repositories','github_branches'], true)) { repository_discovery($token); exit; }
     if ($action === 'archive' || isset($_POST['rollback_archive'])) { archive_deploy($config); exit; }
-    if ($action === 'feedback_transcribe') { feedback_transcribe(); exit; }
+    if ($action === 'feedback_key') { require_once PULL_ROOT.'/admin/deployment/feedback-auth.php'; FeedbackAuth::importKey(); exit; }
+if ($action === 'feedback_transcribe') { feedback_transcribe(); exit; }
     if ($action === 'feedback') { send_feedback($config, $token); exit; }
     if (is_local_install($config) && $action === 'auto') { http_response_code(409); render_dashboard($config, ui('Connect GitHub first.', 'Сначала подключите GitHub.'), true); exit; }
     if ($action === 'connect_repository') {
@@ -1542,7 +1561,8 @@ if (in_array($action, ['github_repositories','github_branches'], true)) { reposi
         try {
             $cfg = ai_config();
             if ($action === 'ai') {
-                $order = array_values(array_filter(array_map('trim', explode(',', (string)($_POST['order'] ?? '')))));
+                $order = array_values(array_filter(array_map('trim', isset($_POST['provider_order']) && is_array($_POST['provider_order']) ? $_POST['provider_order'] : explode(',', (string)($_POST['order'] ?? '')))));
+            if (count($order) !== count(array_unique($order))) throw new RuntimeException('Выберите разные резервные провайдеры.');
                 if (!$order || array_diff($order, LLM::PROVIDERS)) throw new RuntimeException('order');
                 $cfg['order'] = array_values(array_unique($order));
                 foreach (LLM::PROVIDERS as $provider) {
@@ -1719,59 +1739,44 @@ function feedback_github(string $method,string $endpoint,string $token,?array $d
     return [$code,json_decode((string)$body,true)?:[]];
 }
 function feedback_screenshots(string $repo,string $token): string {
-    $files=$_FILES['screenshots']??null;if(!$files||!is_array($files['name']??null))return '';
-    $kept=[];$types=['image/png'=>'png','image/jpeg'=>'jpg','image/webp'=>'webp'];
-    // Validate the complete batch before any GitHub write.
-    foreach($files['name']as$i=>$name){$error=$files['error'][$i]??UPLOAD_ERR_NO_FILE;if($error===UPLOAD_ERR_NO_FILE)continue;
-        if(count($kept)>=5||$error!==UPLOAD_ERR_OK||($files['size'][$i]??0)>5*1024*1024)throw new RuntimeException('Не более пяти изображений по 5 МБ');
-        $path=$files['tmp_name'][$i];$mime=(new finfo(FILEINFO_MIME_TYPE))->file($path);
-        if(!isset($types[$mime])||!@getimagesize($path))throw new RuntimeException('Разрешены скриншоты PNG, JPEG и WebP');
-        $kept[]=['path'=>$path,'ext'=>$types[$mime]];
-    }
-    if(!$kept)return '';
-    [$code,$ref]=feedback_github('GET','repos/'.$repo.'/git/ref/heads/support-assets',$token);
-    if($code===404){[$ok,$head]=feedback_github('GET','repos/'.$repo.'/git/ref/heads/main',$token);if($ok!==200){[$metaCode,$meta]=feedback_github('GET','repos/'.$repo,$token);if($metaCode===200)[$ok,$head]=feedback_github('GET','repos/'.$repo.'/git/ref/heads/'.rawurlencode((string)($meta['default_branch']??'main')),$token);}
-        if($ok!==200)throw new RuntimeException('Не удалось определить ветку для файлов поддержки');[$code,$ref]=feedback_github('POST','repos/'.$repo.'/git/refs',$token,['ref'=>'refs/heads/support-assets','sha'=>$head['object']['sha']]);}
-    if(!in_array($code,[200,201],true))throw new RuntimeException('Для скриншотов нужен токен с Contents: Read and write');
-    $out="\n\n### Скриншоты\n";
-    foreach($kept as$file){$path='support/uploads/'.gmdate('Y/m').'/'.bin2hex(random_bytes(12)).'.'.$file['ext'];
-        [$code,$result]=feedback_github('PUT','repos/'.$repo.'/contents/'.$path,$token,['branch'=>'support-assets','message'=>'Attach feedback screenshot','content'=>base64_encode((string)file_get_contents($file['path']))]);
-        if($code!==201)throw new RuntimeException('Скриншот не сохранён в GitHub; обращение не отправлено');
-        $out.="\n![Скриншот](https://github.com/".$repo.'/blob/support-assets/'.$path."?raw=true)\n";
-    }return $out;
+    if (empty($_FILES['screenshots']['name']) || !array_filter((array)$_FILES['screenshots']['name'])) return '';
+    require_once PULL_ROOT.'/admin/deployment/feedback-media.php';
+    $host=(string)($_SERVER['HTTP_HOST']??'');
+    if (!preg_match('/^[A-Za-z0-9.-]+(?::[0-9]{1,5})?$/D',$host)) throw new RuntimeException('Настройте публичный адрес панели.');
+    $local=in_array($_SERVER['REMOTE_ADDR']??'',['127.0.0.1','::1'],true);
+    $base=(string)getenv('FEEDBACK_PUBLIC_BASE_URL');
+    if ($base==='') $base=($local && empty($_SERVER['HTTPS'])?'http://':'https://').$host.(defined('NEUROSAAS_ADMIN')?'/admin/':'/pull.php');
+    return FeedbackMedia::attach($_FILES['screenshots']??[], $base);
 }
 /** Audio is sent only after an explicit record/recognize action. */
 function feedback_transcribe(): void {
-    header('Content-Type: application/json; charset=utf-8');header('Cache-Control: no-store');
+    header('Content-Type: application/json; charset=utf-8'); header('Cache-Control: no-store');
     try {
-        $cfg=require PULL_ROOT.'/admin/llm_connector/config.php';$model=(string)($cfg['LLM_AUDIO_MODEL']??'');$provider=strpos($model,'openrouter:')===0?'openrouter':'genrouter';$key=(string)($cfg[$provider==='genrouter'?'GENROUTER_API_KEY':'OPENROUTER_API_KEY']??'');
-        if($key===''||!preg_match('/^(genrouter|openrouter):.+$/D',$model))throw new RuntimeException('Подключите GenRouter и выберите голосовую модель в расширенных настройках');
-        $f=$_FILES['audio']??[];if(($f['error']??UPLOAD_ERR_NO_FILE)!==UPLOAD_ERR_OK||($f['size']??0)>10*1024*1024)throw new RuntimeException('Запись не загружена или превышает 10 МБ');
-        $base=$provider==='genrouter'?rtrim((string)$cfg['GENROUTER_BASE_URL'],'/'):'https://openrouter.ai/api/v1';
-        $slug=substr($model,strpos($model,':')+1);$transport='chat';foreach((array)$cfg['AVAILABLE_MODELS']as$row)if(($row['provider']??'')===$provider&&($row['full_id']??'')===$slug)$transport=$row['audio_transport']??'chat';
-        $ch=curl_init($base.($transport==='transcriptions'?'/audio/transcriptions':'/chat/completions'));
-        $mime=(string)($f['type']??'audio/webm');$format=strpos($mime,'ogg')!==false?'ogg':(strpos($mime,'mpeg')!==false?'mp3':'webm');
-        $body=['model'=>$slug,'temperature'=>0,'messages'=>[['role'=>'user','content'=>[['type'=>'text','text'=>'Transcribe this Russian audio. Preserve every fact, add punctuation and repair word agreement. Return only the transcript.'],['type'=>'input_audio','input_audio'=>['format'=>$format,'data'=>base64_encode((string)file_get_contents($f['tmp_name']))]]]]]];
-        $headers=['Authorization: Bearer '.$key];
-        if($transport==='transcriptions')$payload=['model'=>$slug,'file'=>new CURLFile($f['tmp_name'],$mime,'voice.'.$format),'language'=>'ru'];else{$headers[]='Content-Type: application/json';$payload=json_encode($body);}
-        curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_HTTPHEADER=>$headers,CURLOPT_POSTFIELDS=>$payload,CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT=>90]);
-        $raw=curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);curl_close($ch);$data=json_decode((string)$raw,true);$text=$data['text']??$data['choices'][0]['message']['content']??'';
-        if($code!==200||!is_string($text)||trim($text)==='')throw new RuntimeException('Не удалось распознать запись: '.$provider.' / '.$slug.' (HTTP '.$code.'). Проверьте ключ и поддержку аудио выбранной моделью.');
+        require_once PULL_ROOT.'/admin/deployment/audio.php';
+        $cfg = require PULL_ROOT.'/admin/llm_connector/config.php';
+        $f = $_FILES['audio'] ?? [];
+        if (($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) throw new RuntimeException('Запись не загружена.');
+        $text = RouterSpeech::transcribe($cfg, (string)$f['tmp_name'], (string)($f['type'] ?? ''), (string)($_POST['audio_model'] ?? ''));
         require_once PULL_ROOT.'/admin/deployment/speech.php';
         require_once PULL_ROOT.'/admin/llm_connector/llm.php';
         ToolkitLLM::init($cfg);
         $formatted=FeedbackSpeech::format($text,static function($prompt,$transcript){return ToolkitLLM::chatText($prompt,$transcript,null,0.0);});
         echo json_encode($formatted,JSON_UNESCAPED_UNICODE);
-    }catch(Throwable $e){http_response_code(422);echo json_encode(['error'=>$e->getMessage()],JSON_UNESCAPED_UNICODE);}
+    } catch(Throwable $e) { http_response_code(422); echo json_encode(['error'=>$e->getMessage()],JSON_UNESCAPED_UNICODE); }
 }
 function feedback_media_controls(): void {
-    $ready=false;
-    if(is_file(PULL_ROOT.'/admin/llm_connector/config.php')){ $cfg=require PULL_ROOT.'/admin/llm_connector/config.php';$model=(string)($cfg['LLM_AUDIO_MODEL']??'');$audioProvider=strpos($model,'openrouter:')===0?'OPENROUTER_API_KEY':'GENROUTER_API_KEY';$ready=(preg_match('/^(genrouter|openrouter):.+$/D',$model) && !empty($cfg[$audioProvider])); }
-    echo '<label>Скриншоты (или вставьте из буфера)<input type="file" name="screenshots[]" accept="image/png,image/jpeg,image/webp" multiple></label><p data-shot-status role="status"></p><button type="button" data-dictate' . ($ready ? '' : ' hidden') . '>Надиктовать</button><p data-voice-status role="status"></p>';
+    if (!is_file(PULL_ROOT.'/admin/deployment/audio.php') || !is_file(PULL_ROOT.'/admin/llm_connector/config.php')) { echo '<p>Завершите установку сервиса для подключения вложений и голосового ввода.</p>'; return; }
+    require_once PULL_ROOT.'/admin/deployment/audio.php';
+    $cfg = require PULL_ROOT.'/admin/llm_connector/config.php';
+    $models = RouterSpeech::models($cfg); $ready = (bool)$models;
+    echo '<label for="feedback-audio-model">Голосовая модель</label><select id="feedback-audio-model" name="audio_model"' . ($ready ? '' : ' disabled') . '>';
+    foreach ($models as $id=>$row) echo '<option value="' . h($id) . '"' . (($cfg['LLM_AUDIO_MODEL'] ?? '') === $id ? ' selected' : '') . '>' . h(ucfirst($row['provider']) . ' · ' . $row['label']) . '</option>';
+    echo '</select><p class="help">Модели с поддержкой аудио из каталога провайдера. <a href="?toolkit=1" target="_blank" rel="noopener">Подключить ключ или обновить каталог GenRouter</a></p>';
+    echo '<label>Скриншоты (вставьте из буфера; ссылки доступны получателям задачи 30 дней)<input type="file" name="screenshots[]" accept="image/png,image/jpeg,image/webp" multiple></label><p data-shot-status role="status"></p><button type="button" data-dictate' . ($ready ? '' : ' hidden') . '>Надиктовать</button><p data-voice-status role="status"></p>';
     echo <<<'HTML'
 <script>(()=>{const f=document.currentScript.closest('form'),files=f.querySelector('[name="screenshots[]"]'),body=f.querySelector('[name=description]'),btn=f.querySelector('[data-dictate]'),status=f.querySelector('[data-voice-status]');let rec=null,timer;
 f.addEventListener('paste',e=>{const images=[...e.clipboardData.files].filter(x=>x.type.startsWith('image/'));if(!images.length)return;e.preventDefault();const list=new DataTransfer();[...files.files,...images].slice(0,5).forEach(x=>list.items.add(x));files.files=list.files;f.querySelector('[data-shot-status]').textContent='Приложено изображений: '+list.files.length;});
-btn.addEventListener('click',async()=>{if(rec&&rec.state==='recording'){rec.stop();return;}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true}),chunks=[];rec=new MediaRecorder(stream);const started=Date.now();rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};rec.onstop=async()=>{clearInterval(timer);stream.getTracks().forEach(x=>x.stop());btn.disabled=true;status.textContent='Распознаём…';const data=new FormData();data.set('action','feedback_transcribe');data.set('csrf',f.querySelector('[name=csrf]').value);data.set('audio',new Blob(chunks,{type:rec.mimeType}),'voice.webm');try{const res=await fetch('?',{method:'POST',body:data}),d=await res.json();if(!res.ok||d.error)throw Error(d.error||'Ошибка распознавания');body.value+=(body.value?'\n':'')+d.text;body.dispatchEvent(new Event('input',{bubbles:true}));status.textContent=d.warning||'Расшифровка добавлена.'}catch(e){status.textContent=e.message}finally{btn.disabled=false;btn.textContent='Надиктовать'}};rec.start();btn.textContent='Остановить';timer=setInterval(()=>{const left=Math.max(0,30-Math.floor((Date.now()-started)/1000));status.textContent='Осталось секунд: '+left;if(!left&&rec.state==='recording')rec.stop()},300)}catch(e){status.textContent='Для записи нужен HTTPS и доступ к микрофону.'}});})();</script>
+btn.addEventListener('click',async()=>{if(rec&&rec.state==='recording'){rec.stop();return;}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true}),chunks=[];rec=new MediaRecorder(stream);const started=Date.now();rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};rec.onstop=async()=>{clearInterval(timer);stream.getTracks().forEach(x=>x.stop());btn.disabled=true;status.textContent='Распознаём…';const data=new FormData();data.set('audio_model',f.querySelector('[name=audio_model]').value);data.set('action','feedback_transcribe');data.set('csrf',f.querySelector('[name=csrf]').value);data.set('audio',new Blob(chunks,{type:rec.mimeType}),'voice.webm');try{const res=await fetch('?',{method:'POST',body:data}),d=await res.json();if(!res.ok||d.error)throw Error(d.error||'Ошибка распознавания');body.value+=(body.value?'\n':'')+d.text;body.dispatchEvent(new Event('input',{bubbles:true}));status.textContent=d.warning||'Расшифровка добавлена.'}catch(e){status.textContent=e.message}finally{btn.disabled=false;btn.textContent='Надиктовать'}};rec.start();btn.textContent='Остановить';timer=setInterval(()=>{const left=Math.max(0,30-Math.floor((Date.now()-started)/1000));status.textContent='Осталось секунд: '+left;if(!left&&rec.state==='recording')rec.stop()},300)}catch(e){status.textContent='Для записи нужен HTTPS и доступ к микрофону.'}});})();</script>
 HTML;
 }
 
@@ -1781,7 +1786,13 @@ function sync_genrouter_toolkit(array $cfg): void {
     require_once PULL_ROOT.'/admin/llm_connector/settings_store.php';
     $settings=require PULL_ROOT.'/admin/llm_connector/config.php';
     $store=new SettingsStore((string)$settings['DB_PATH']);
-    $store->setSetting('GENROUTER_API_KEY',(string)($cfg['genrouter']['key']??''));
+    foreach (['genrouter'=>'GENROUTER_API_KEY','openrouter'=>'OPENROUTER_API_KEY','yandex'=>'YANDEX_API_KEY'] as $provider=>$key) {
+        $value=(string)($cfg[$provider]['key']??'');
+        if ($value!=='' || isset($_POST[$provider.'_clear_key'])) $store->setSetting($key,$value);
+    }
+    if (!empty($cfg['yandex']['folder'])) $store->setSetting('YANDEX_FOLDER_ID',(string)$cfg['yandex']['folder']);
+    $store->setSetting('YANDEX_FALLBACK_MODEL',(string)($cfg['yandex']['model']??''));
+    if (!empty($cfg['openrouter']['model'])) $store->setSetting('LLM_FALLBACK_MODEL',(string)$cfg['openrouter']['model']);
     if(!empty($cfg['genrouter']['model'])){ $store->setSetting('GENROUTER_MODEL',(string)$cfg['genrouter']['model']); if(($cfg['order'][0]??'')==='genrouter')$store->setSetting('LLM_DEFAULT_MODEL','genrouter:'.(string)$cfg['genrouter']['model']); }
     $store->setSetting('LLM_PROVIDER_PRIORITY',implode(',',(array)$cfg['order']));
     $store->setSetting('LLM_PROVIDER',(string)($cfg['order'][0]??'genrouter'));

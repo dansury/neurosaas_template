@@ -53,6 +53,7 @@ with tempfile.TemporaryDirectory(prefix='neurosaas-http-') as work:
     if (defined('PULL_LIBRARY_ONLY')) return;''')
     (work / 'pull.php').write_text(source)
     shutil.copytree(ROOT / 'admin' / 'llm_connector', work / 'admin' / 'llm_connector', ignore=shutil.ignore_patterns('data'))
+    shutil.copytree(ROOT / 'admin' / 'deployment', work / 'admin' / 'deployment')
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
@@ -92,7 +93,8 @@ with tempfile.TemporaryDirectory(prefix='neurosaas-http-') as work:
         setup = dict(csrf=csrf(html), repo='owner/repo', branch='main', subdir='.', timezone='UTC', gh_token='FAKE_KEY', password='sample-pass', auto_pull='1', auto_interval='60')
         status, html = request(data=setup)
         expect(status == 200 and 'Подключение настроено' in html, 'first-run setup saves')
-        expect((work / 'pull-config.php').stat().st_mode & 0o777 == 0o600, 'config private permissions')
+        if os.name != 'nt':
+            expect((work / 'pull-config.php').stat().st_mode & 0o777 == 0o600, 'config private permissions')
         expect('sample-pass' not in (work / 'pull-config.php').read_text(), 'password hash only')
         status, html = request()
         expect(status == 401 and 'Вход в управление' in html, 'password gate')

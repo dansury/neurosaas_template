@@ -6,6 +6,8 @@ php tests/layout.php
 php tests/toolkit.php
 php tests/diagnostics.php
 php tests/operator_workflows.php
+php tests/feedback_audio.php
+php tests/feedback_auth.php
 python3 tests/pull_python.py
 for test in admin/llm_connector/tests/*.php; do
   php "$test" > /tmp/neurosaas-suite.log 2>&1 || { cat /tmp/neurosaas-suite.log; exit 1; }

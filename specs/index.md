@@ -1,5 +1,7 @@
 # NeuroSaaS specifications
 
+- [Feedback controls](013-feedback-controls/spec.md): GitHub login, encrypted support credential, voice model selection, screenshots and provider fallback controls. [Plan](013-feedback-controls/plan.md), [tasks](013-feedback-controls/tasks.md).
+
 - [First administrator without mail](012-first-admin/spec.md): immediate initial enrollment, protected email recovery and direct feedback navigation.
 
 - [Installable application and notifications](010-webapp/spec.md): reusable PWA, private owner-device subscriptions and dependency-free Web Push.
