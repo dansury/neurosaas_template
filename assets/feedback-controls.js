@@ -14,17 +14,18 @@
  if(!button)return;
  button.addEventListener('click',async()=>{
   if(rec?.state==='recording'){rec.stop();return;}
+  const run=++epoch;
   try{
-   const run=++epoch;cancelled=false;stream=await navigator.mediaDevices.getUserMedia({audio:true});if(cancelled||run!==epoch){stream.getTracks().forEach(track=>track.stop());return;}const chunks=[];rec=new MediaRecorder(stream);const started=Date.now();
+   cancelled=false;const acquired=await navigator.mediaDevices.getUserMedia({audio:true});if(cancelled||run!==epoch){acquired.getTracks().forEach(track=>track.stop());return;}stream=acquired;const chunks=[];rec=new MediaRecorder(acquired);const started=Date.now();
    rec.ondataavailable=event=>{if(event.data.size)chunks.push(event.data);};
    rec.onstop=async()=>{
-    clearInterval(timer);stream.getTracks().forEach(track=>track.stop());if(cancelled||run!==epoch)return;
+    clearInterval(timer);acquired.getTracks().forEach(track=>track.stop());if(cancelled||run!==epoch)return;
     button.disabled=true;status.textContent='Распознаём…';const data=new FormData();data.set('audio_model',form.querySelector('[name=audio_model]').value);data.set('action','feedback_transcribe');data.set('csrf',form.querySelector('[name=csrf]').value);data.set('audio',new Blob(chunks,{type:rec.mimeType}),'voice.webm');
     try{const response=await fetch(form.action,{method:'POST',body:data,credentials:'same-origin'}),result=await response.json();if(!response.ok||result.error)throw Error(result.error||'Ошибка распознавания');if(cancelled||run!==epoch)return;body.value+=(body.value?'\n':'')+result.text;body.dispatchEvent(new Event('input',{bubbles:true}));status.textContent=result.warning||'Расшифровка добавлена.';}
     catch(error){if(!cancelled&&run===epoch)status.textContent=error.message;}
     finally{if(run===epoch){button.disabled=false;button.textContent='Голосом';}}
    };
    rec.start();button.textContent='Остановить';timer=setInterval(()=>{const left=Math.max(0,30-Math.floor((Date.now()-started)/1000));status.textContent='Осталось секунд: '+left;if(!left&&rec.state==='recording')rec.stop();},300);
-  }catch(error){stream?.getTracks().forEach(track=>track.stop());status.textContent='Для записи нужен HTTPS и доступ к микрофону.';}
+  }catch(error){if(run!==epoch)return;stream?.getTracks().forEach(track=>track.stop());status.textContent='Для записи нужен HTTPS и доступ к микрофону.';}
  });
 })();

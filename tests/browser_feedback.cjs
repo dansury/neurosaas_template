@@ -52,6 +52,16 @@ async function port(){return new Promise(resolve=>{const s=net.createServer();s.
       await frame.locator('[name=description]').evaluate((el,bytes)=>{const transfer=new DataTransfer();transfer.items.add(new File([new Uint8Array(bytes)],'clipboard.png',{type:'image/png'}));el.dispatchEvent(new ClipboardEvent('paste',{clipboardData:transfer,bubbles:true,cancelable:true}));},[...png]);
       assert.equal(await frame.locator('[name="screenshots[]"]').evaluate(el=>el.files.length),1);
       await frame.locator('[name="screenshots[]"]').setInputFiles([{name:'one.png',mimeType:'image/png',buffer:png},{name:'two.png',mimeType:'image/png',buffer:png}]);await frame.getByRole('button',{name:'Убрать one.png',exact:true}).click();assert.equal(await frame.locator('[name="screenshots[]"]').evaluate(el=>el.files.length),1);
+    if(width===1280){
+      await page.evaluate(()=>{window.micResolvers=[];window.micStops=[0,0];navigator.mediaDevices.getUserMedia=()=>new Promise(resolve=>window.micResolvers.push(resolve));});
+      await frame.getByRole('button',{name:'Голосом',exact:true}).click();await page.waitForFunction(()=>window.micResolvers.length===1);
+      await page.getByRole('button',{name:'Закрыть окно доработки',exact:true}).click();await page.locator('header a[href="?feedback=1"]').click();
+      await frame.getByRole('button',{name:'Голосом',exact:true}).click();await page.waitForFunction(()=>window.micResolvers.length===2);
+      await page.evaluate(()=>window.micResolvers[1]({getTracks:()=>[{stop(){window.micStops[1]++;}}]}));await frame.getByRole('button',{name:'Остановить',exact:true}).waitFor();
+      await page.evaluate(()=>window.micResolvers[0]({getTracks:()=>[{stop(){window.micStops[0]++;}}]}));await page.waitForFunction(()=>window.micStops[0]>0);
+      await page.getByRole('button',{name:'Закрыть окно доработки',exact:true}).click();await page.waitForFunction(()=>window.micStops[1]>0);
+      await page.locator('header a[href="?feedback=1"]').click();assert(await frame.getByRole('button',{name:'Голосом',exact:true}).isVisible());
+    }
     const box=await page.locator('dialog').boundingBox();await page.locator('.feedback-dialog-handle').focus();await page.keyboard.press('ArrowLeft');const moved=await page.locator('dialog').boundingBox();assert(moved.x<=box.x);
       fs.mkdirSync(path.join(base,'work'),{recursive:true});await page.screenshot({path:path.join(base,'work','feedback-'+width+'.png'),fullPage:true});
       if(width===1280){
