@@ -962,8 +962,19 @@ function require_auth(string $hash, string $mode): void {
         exit;
     }
 
-    $cookie = (string)($_COOKIE[AUTH_COOKIE] ?? '');
-    if ($cookie !== '' && auth_token_valid($cookie, $hash)) return;
+    foreach ([auth_cookie_name(), AUTH_COOKIE] as $cookieName) {
+        $values = [(string)($_COOKIE[$cookieName] ?? '')];
+        foreach (explode(';', (string)($_SERVER['HTTP_COOKIE'] ?? '')) as $part) {
+            $pair = explode('=', trim($part), 2);
+            if ($pair[0] === $cookieName) $values[] = rawurldecode($pair[1] ?? '');
+        }
+        foreach (array_unique($values) as $cookie) {
+            if ($cookie !== '' && auth_token_valid($cookie, $hash)) {
+                if ($cookieName === AUTH_COOKIE) auth_cookie_set($hash, false);
+                return;
+            }
+        }
+    }
 
     // Password may also arrive from a form post, a query param, or a header (cron).
     $supplied = null;
@@ -1012,10 +1023,13 @@ function auth_token_valid(string $token, string $hash): bool {
     return hash_equals(hash_hmac('sha256', 'pull-auth|' . $expires, $hash), $parts[1]);
 }
 
+function auth_cookie_name(): string {
+    return AUTH_COOKIE . '_' . substr(hash('sha256', auth_cookie_path()), 0, 12);
+}
 function auth_cookie_set(string $hash, bool $remember): void {
     $ttl     = $remember ? AUTH_REMEMBER_TTL : AUTH_SESSION_TTL;
     $expires = time() + $ttl;
-    setcookie(AUTH_COOKIE, auth_token($hash, $expires), [
+    setcookie(auth_cookie_name(), auth_token($hash, $expires), [
         'expires'  => $remember ? $expires : 0, // 0 = cookie dies with the browser session
         'path'     => auth_cookie_path(),
         'secure'   => auth_is_https(),
@@ -1025,16 +1039,13 @@ function auth_cookie_set(string $hash, bool $remember): void {
 }
 
 function auth_cookie_clear(): void {
-    setcookie(AUTH_COOKIE, '', [
-        'expires'  => time() - 3600,
-        'path'     => auth_cookie_path(),
-        'secure'   => auth_is_https(),
-        'httponly' => true,
-        'samesite' => 'Lax',
-    ]);
+    $base = auth_cookie_path();
+    foreach ([auth_cookie_name(), AUTH_COOKIE] as $name) {
+        foreach (array_unique([$base, $base . 'admin', $base . 'admin/', $base . 'pull.php']) as $path) {
+            setcookie($name, '', ['expires'=>time()-3600, 'path'=>$path, 'secure'=>auth_is_https(), 'httponly'=>true, 'samesite'=>'Lax']);
+        }
+    }
 }
-
-// Scope the cookie to the directory the script lives in, not the whole host.
 function auth_cookie_path(): string {
     if (defined('NEUROSAAS_ADMIN')) {
         $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? '/admin/index.php'));
@@ -1186,8 +1197,11 @@ function handle_setup_post(string $configPath): void {
 function ui(string $en, string $ru): string { return ($GLOBALS['pull_language'] ?? 'en') === 'ru' ? $ru : $en; }
 function h($value): string { return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 function init_panel(): void {
-    if (PHP_SAPI !== 'cli') {
-        session_name('pull_panel');
+    if (PHP_SAPI !== 'cli' && session_status() === PHP_SESSION_NONE) {
+        $pending = is_file(PULL_ROOT . '/' . CONFIG_FILE) ? require PULL_ROOT . '/' . CONFIG_FILE : [];
+        $legacyBootstrap = !empty($pending['bootstrap_session']) && empty($pending['password_hash']);
+        $scopedName = 'pull_panel_' . substr(hash('sha256', auth_cookie_path()), 0, 12);
+        session_name($legacyBootstrap && !isset($_COOKIE[$scopedName]) && isset($_COOKIE['pull_panel']) ? 'pull_panel' : $scopedName);
         session_set_cookie_params(['httponly' => true, 'secure' => auth_is_https(), 'samesite' => 'Lax', 'path' => auth_cookie_path()]);
         if (!@session_start()) {
             http_response_code(500);
@@ -1355,7 +1369,6 @@ function render_dashboard(array $config, string $message = '', bool $error = fal
     field('new_password', ui('New password', 'Новый пароль'), '', ui('At least 12 characters. It is saved only as a hash.', 'Не менее 12 символов. На сервере сохраняется только хеш.'), 'password');
     field('new_password_confirm', ui('Repeat new password', 'Повторите новый пароль'), '', '', 'password');
     echo '<button class="secondary">' . ui('Replace password', 'Заменить пароль') . '</button></form></section>';
-    feedback_form();
     render_ai_settings();
     $js = ['local' => is_local_install($config), 'csrf' => $_SESSION['pull_csrf'], 'interval' => $config['auto_interval'], 'auto' => $config['auto_pull'], 'ru' => $GLOBALS['pull_language'] === 'ru'];
     echo '<script>window.panelConfig=' . json_encode($js, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>' . panel_js();
@@ -1392,12 +1405,12 @@ function render_feedback(string $message = '', bool $error = false, string $url 
     $issuesUrl = preg_match('~^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$~', $repo) ? 'https://github.com/' . $repo . '/issues' : '';
 
     page_start(ui('Ideas for improvement', 'Идеи для доработки'));
-    if (is_file(PULL_ROOT.'/admin/deployment/feedback-auth.php')) { require_once PULL_ROOT.'/admin/deployment/feedback-auth.php'; FeedbackAuth::controls(); }
+    if (is_file(PULL_ROOT.'/admin/deployment/feedback-auth.php')) { require_once PULL_ROOT.'/admin/deployment/feedback-auth.php'; echo '<div data-feedback-auth>'; FeedbackAuth::controls(); echo '</div>'; }
     if ($message !== '') echo '<p role="status" class="notice ' . ($error ? 'error' : 'success') . '">' . h($message) . ($url !== '' ? ' <a target="_blank" rel="noopener" href="' . h($url) . '">' . ui('Open created issue', 'Открыть созданную задачу') . '</a>' : '') . '</p>';
     if ($tokenHelp && $repo !== '') echo '<p class="help"><a target="_blank" rel="noopener" href="' . h(pat_url($repo, ($config['source'] ?? '') === 'pr')) . '">' . ui('Create or replace the GitHub access key', 'Создать или заменить ключ доступа GitHub') . '</a></p>';
     if ($celebrate && $issuesUrl !== '') {
         $prompt = 'resolve ' . $issuesUrl;
-        echo '<section class="success"><h2>' . ui('Your first idea is in the repository!', 'Первая идея уже в репозитории!') . '</h2><p>' . ui('You can send another idea or give an AI coding assistant this prompt:', 'Можно отправить ещё одну идею или передать AI-агенту эту команду:') . '</p><pre>' . h($prompt) . '</pre><a class="button secondary" target="_blank" rel="noopener" href="' . h($issuesUrl) . '">' . ui('Open issue list', 'Открыть список задач') . '</a></section>';
+        echo '<section class="success"><h2>' . ui('Your idea is in the repository!', 'Идея уже в репозитории!') . '</h2><p>' . ui('You can send another idea or give an AI coding assistant this prompt:', 'Можно отправить ещё одну идею или передать AI-агенту эту команду:') . '</p><pre>' . h($prompt) . '</pre><a class="button secondary" target="_blank" rel="noopener" href="' . h($issuesUrl) . '">' . ui('Open issue list', 'Открыть список задач') . '</a></section>';
     }
     feedback_form();
     page_end();
@@ -1455,7 +1468,7 @@ function send_feedback(array $config, string $token): void {
 }
 function github_create_feedback(string $repo, string $token, string $title, string $body): array {
     $headers = ['Accept: application/vnd.github+json', 'User-Agent: NeuroSaaS-feedback', 'X-GitHub-Api-Version: 2022-11-28', 'Content-Type: application/json', 'Authorization: Bearer ' . $token];
-    $payload = json_encode(['title' => $title, 'body' => $body . "\n\n---\nSubmitted through the service feedback form."], JSON_UNESCAPED_UNICODE);
+    $payload = json_encode(['title'=>$title, 'body'=>$body], JSON_UNESCAPED_UNICODE);
     $url = 'https://api.github.com/repos/' . $repo . '/issues'; $code = 0;
     if (function_exists('curl_init')) {
         $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => $headers, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 8, CURLOPT_FOLLOWLOCATION => false]);
@@ -1498,7 +1511,9 @@ function render_ai_settings(): void {
         field($provider . '_key', ui('API key', 'API-ключ'), '', ($p['key'] !== '' ? ui('Key saved. Leave blank to keep it.', 'Ключ сохранён. Оставьте поле пустым, чтобы его не менять.') : ui('Paste the provider API key.', 'Вставьте API-ключ провайдера.')), 'password');
         checkbox($provider . '_clear_key', ui('Remove saved key', 'Удалить сохранённый ключ'), false);
         if ($provider === 'yandex') {
+            echo '<div data-yandex-folder'.($p['key']===''?' hidden':'').'>';
             field('yandex_folder', ui('Yandex Cloud folder ID', 'ID каталога Yandex Cloud'), $p['folder'], ui('Copy folder ID from the cloud console. It is not your cloud ID.', 'Скопируйте ID каталога из консоли облака. Это не ID облака.'));
+            echo '</div>';
             echo '<label for="f_yandex_route">' . ui('Yandex API route', 'API Yandex') . '</label><select id="f_yandex_route" name="yandex_route"><option value="native">Foundation Models (YandexGPT)</option><option value="openai"' . ($p['route'] === 'openai' ? ' selected' : '') . '>OpenAI-compatible (Qwen / Llama / other)</option></select>';
             field('yandex_openai_base', ui('OpenAI-compatible base URL', 'Базовый URL OpenAI-совместимого API'), $p['openai_base'], ui('Default: https://ai.api.cloud.yandex.net/v1. Use this route for Qwen, Llama and other open models; YandexGPT uses the Foundation Models route above.', 'По умолчанию: https://ai.api.cloud.yandex.net/v1. Используйте этот маршрут для Qwen, Llama и других открытых моделей; для YandexGPT выберите маршрут Foundation Models выше.'));
         }
@@ -1509,6 +1524,7 @@ function render_ai_settings(): void {
         }
         echo '</details>';
     }
+    echo '<script>(()=>{const f=document.currentScript.closest("form"),key=f.querySelector("[name=yandex_key]"),clear=f.querySelector("[name=yandex_clear_key]"),folder=f.querySelector("[data-yandex-folder]");const saved='.json_encode($cfg['yandex']['key']!=='').';const update=()=>{folder.hidden=!(key.value.trim()||(saved&&!clear.checked));};key.addEventListener("input",update);clear.addEventListener("change",update);update();})();</script>';
     echo '<button>' . ui('Save AI connections', 'Сохранить подключения') . '</button></form><p class="help">' . ui('Testing sends a small paid request. Catalog loading does not generate text. Save changes first.', 'Проверка отправляет небольшой платный запрос. Загрузка каталога не генерирует текст. Сначала сохраните изменения.') . '</p><form method="post" action="?">' . csrf_field() . '<input type="hidden" name="action" value="ai_test"><label>' . ui('Provider', 'Провайдер') . '<select name="provider"><option>genrouter</option><option>openrouter</option><option>yandex</option></select></label><button class="secondary" name="operation" value="test">' . ui('Test connection', 'Проверить подключение') . '</button><button class="secondary" name="operation" value="models">' . ui('Load model catalog', 'Загрузить каталог моделей') . '</button></form></section>';
 }
 function save_php_config(string $path, array $config): bool {
@@ -1765,23 +1781,21 @@ function feedback_transcribe(): void {
     } catch(Throwable $e) { http_response_code(422); echo json_encode(['error'=>$e->getMessage()],JSON_UNESCAPED_UNICODE); }
 }
 function feedback_media_controls(): void {
-    if (!is_file(PULL_ROOT.'/admin/deployment/audio.php') || !is_file(PULL_ROOT.'/admin/llm_connector/config.php')) { echo '<p>Завершите установку сервиса для подключения вложений и голосового ввода.</p>'; return; }
+    if (!is_file(PULL_ROOT.'/admin/deployment/audio.php') || !is_file(PULL_ROOT.'/admin/llm_connector/config.php')) return;
     require_once PULL_ROOT.'/admin/deployment/audio.php';
-    $cfg = require PULL_ROOT.'/admin/llm_connector/config.php';
-    $models = RouterSpeech::models($cfg); $ready = (bool)$models;
-    echo '<label for="feedback-audio-model">Голосовая модель</label><select id="feedback-audio-model" name="audio_model"' . ($ready ? '' : ' disabled') . '>';
-    foreach ($models as $id=>$row) echo '<option value="' . h($id) . '"' . (($cfg['LLM_AUDIO_MODEL'] ?? '') === $id ? ' selected' : '') . '>' . h(ucfirst($row['provider']) . ' · ' . $row['label']) . '</option>';
-    echo '</select><p class="help">Модели с поддержкой аудио из каталога провайдера. <a href="?toolkit=1" target="_blank" rel="noopener">Подключить ключ или обновить каталог GenRouter</a></p>';
-    echo '<label>Скриншоты (вставьте из буфера; ссылки доступны получателям задачи 30 дней)<input type="file" name="screenshots[]" accept="image/png,image/jpeg,image/webp" multiple></label><p data-shot-status role="status"></p><button type="button" data-dictate' . ($ready ? '' : ' hidden') . '>Надиктовать</button><p data-voice-status role="status"></p>';
-    echo <<<'HTML'
-<script>(()=>{const f=document.currentScript.closest('form'),files=f.querySelector('[name="screenshots[]"]'),body=f.querySelector('[name=description]'),btn=f.querySelector('[data-dictate]'),status=f.querySelector('[data-voice-status]');let rec=null,timer;
-f.addEventListener('paste',e=>{const images=[...e.clipboardData.files].filter(x=>x.type.startsWith('image/'));if(!images.length)return;e.preventDefault();const list=new DataTransfer();[...files.files,...images].slice(0,5).forEach(x=>list.items.add(x));files.files=list.files;f.querySelector('[data-shot-status]').textContent='Приложено изображений: '+list.files.length;});
-btn.addEventListener('click',async()=>{if(rec&&rec.state==='recording'){rec.stop();return;}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true}),chunks=[];rec=new MediaRecorder(stream);const started=Date.now();rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};rec.onstop=async()=>{clearInterval(timer);stream.getTracks().forEach(x=>x.stop());btn.disabled=true;status.textContent='Распознаём…';const data=new FormData();data.set('audio_model',f.querySelector('[name=audio_model]').value);data.set('action','feedback_transcribe');data.set('csrf',f.querySelector('[name=csrf]').value);data.set('audio',new Blob(chunks,{type:rec.mimeType}),'voice.webm');try{const res=await fetch('?',{method:'POST',body:data}),d=await res.json();if(!res.ok||d.error)throw Error(d.error||'Ошибка распознавания');body.value+=(body.value?'\n':'')+d.text;body.dispatchEvent(new Event('input',{bubbles:true}));status.textContent=d.warning||'Расшифровка добавлена.'}catch(e){status.textContent=e.message}finally{btn.disabled=false;btn.textContent='Надиктовать'}};rec.start();btn.textContent='Остановить';timer=setInterval(()=>{const left=Math.max(0,30-Math.floor((Date.now()-started)/1000));status.textContent='Осталось секунд: '+left;if(!left&&rec.state==='recording')rec.stop()},300)}catch(e){status.textContent='Для записи нужен HTTPS и доступ к микрофону.'}});})();</script>
-HTML;
+    $cfg=require PULL_ROOT.'/admin/llm_connector/config.php';
+    $models=RouterSpeech::models($cfg);
+    echo '<label>Скриншоты <input type="file" name="screenshots[]" accept="image/png,image/jpeg,image/webp" multiple></label><div class="feedback-shots" data-shot-list></div><p class="help" data-shot-status role="status">Можно вставить изображение из буфера обмена.</p>';
+    if ($models) {
+        echo '<button type="button" class="secondary" data-dictate>Голосом</button><details class="feedback-models"><summary>Голосовая модель</summary><select name="audio_model" aria-label="Голосовая модель">';
+        foreach($models as $row) echo '<option value="'.h($row['id']).'"'.(($cfg['LLM_AUDIO_MODEL']??'')===$row['id']?' selected':'').'>'.h($row['label']).'</option>';
+        echo '</select><a href="?toolkit=1#provider-keys" target="_blank" rel="noopener">Подключения провайдеров ↗</a></details>';
+    } else {
+        echo '<a class="button secondary" href="?toolkit=1#provider-keys" target="_blank" rel="noopener" data-connect-voice>Голосом ↗</a><p class="help">Подключите GenRouter, OpenRouter или Yandex и выберите доступную голосовую модель.</p>';
+    }
+    echo '<p data-voice-status role="status"></p><script>'.file_get_contents(PULL_ROOT.'/assets/feedback-controls.js').'</script>';
 }
 
-
-/** Keep the original host adapter and advanced toolkit on the same GenRouter key. */
 function sync_genrouter_toolkit(array $cfg): void {
     require_once PULL_ROOT.'/admin/llm_connector/settings_store.php';
     $settings=require PULL_ROOT.'/admin/llm_connector/config.php';

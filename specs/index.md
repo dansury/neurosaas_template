@@ -1,5 +1,7 @@
 # NeuroSaaS specifications
 
+- [Feedback usability](017-feedback-usability/spec.md): compact feedback, provider keys and cookie migration; [plan](017-feedback-usability/plan.md), [tasks](017-feedback-usability/tasks.md).
+
 - [Feedback controls](013-feedback-controls/spec.md): GitHub login, encrypted support credential, voice model selection, screenshots and provider fallback controls. [Plan](013-feedback-controls/plan.md), [tasks](013-feedback-controls/tasks.md).
 
 - [First administrator without mail](012-first-admin/spec.md): immediate initial enrollment, protected email recovery and direct feedback navigation.
