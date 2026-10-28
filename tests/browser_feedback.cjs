@@ -2,11 +2,12 @@ const {chromium}=require('playwright');
 const fs=require('fs'),path=require('path'),os=require('os'),cp=require('child_process'),net=require('net'),assert=require('assert');
 const base=path.resolve(__dirname,'..'),tmp=fs.mkdtempSync(path.join(os.tmpdir(),'feedback-browser-')),root=path.join(tmp,'site');
 fs.cpSync(base,root,{recursive:true,filter:p=>!path.relative(base,p).split(path.sep).some(x=>['.git','.serena','data','node_modules','work','__pycache__'].includes(x))});
-const php=process.env.PHP_BIN||'php',env={...process.env,GENLA_DATA_DIR:path.join(tmp,'private'),SELFHEAL_REPORTING:'off'};
+const php=process.env.PHP_BIN||'php',env={...process.env,SELFHEAL_REPORTING:'off'};
 function cli(source){return cp.execFileSync(php,['-r',source],{cwd:root,env,encoding:'utf8'});}
 cli("file_put_contents('pull-config.php','<?php return '.var_export(['repo'=>'fixture/repo','branch'=>'main','password_hash'=>password_hash('feedback-fixture-pass',PASSWORD_DEFAULT),'admin_email'=>'owner@example.test','admin_email_verified'=>true,'auto_pull'=>false],true).';');define('PULL_LIBRARY_ONLY',true);require 'pull.php';require 'admin/deployment/feedback-auth.php';file_put_contents('admin/deployment/feedback-credential.enc',FeedbackAuth::seal('fixture-issue-only'));copy('admin/account/data/feedback.key','fixture.key');unlink('admin/account/data/feedback.key');");
 for(const rel of ['pull.php','admin/deployment/panel.php']){
   const file=path.join(root,rel);let source=fs.readFileSync(file,'utf8');
+  source=source.replace(/function gh_api\([^\n]+\n[\s\S]*?(?=\nfunction )/,"function gh_api(string $path,string $token): array { return [null,'Offline fixture']; }\n");
   source=source.replace(/function github_create_feedback\([^\n]+\n[\s\S]*?(?=\nfunction )/,`function github_create_feedback(string $repo,string $token,string $title,string $body): array {
     file_put_contents(PULL_ROOT.'/fixture-issue.json',json_encode(['repo'=>$repo,'title'=>$title,'body'=>$body,'support_key'=>$token==='fixture-issue-only']));
     return [201,['html_url'=>'https://github.com/'.$repo.'/issues/123']];

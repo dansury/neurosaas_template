@@ -1,6 +1,6 @@
 # Feedback controls
 
-Created: 2026-10-28. Input: issue #36 and shared provider controls requested in GENLA #8.
+Created: 2026-10-28. Input: issue #36 and explicit provider fallback controls.
 
 ## User story and requirements
 An authenticated owner submits a development request with screenshots and dictation, or opens GitHub's own login and issue composer.
