@@ -122,16 +122,17 @@ final class Toolkit
     }
 
     /** Auth and CSRF are checked by pull.php before entering the canonical settings page. */
-    public static function settings(string $csrf): void
+    public static function settings(string $csrf, string $navigation = ''): void
     {
         self::boot();
         if (!defined('SITE_TOOLKIT_HOST_AUTHENTICATED')) define('SITE_TOOLKIT_HOST_AUTHENTICATED', true);
         require_once self::module() . '/feedback_widget.php';
         ob_start(); \neurosaas_feedback_widget('?feedback=1'); $feedbackWidget=(string)ob_get_clean();
-        ob_start(static function (string $html) use ($csrf,$feedbackWidget): string {
+        ob_start(static function (string $html) use ($csrf,$feedbackWidget,$navigation): string {
             $html = str_replace('setup.php', '?toolkit=1', $html);
             $field = '<input type="hidden" name="csrf" value="' . htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') . '">';
             $html = preg_replace('~(<form\\b[^>]*>)~i', '$1' . $field, $html);
+            if ($navigation !== '') $html = str_replace('<body>', '<body class="host-admin-panel">' . $navigation, $html);
             return str_replace('</body>', $feedbackWidget . '<p><a href="?">Вернуться в панель NeuroSaaS</a></p></body>', $html);
         });
         require self::module() . '/setup.php';

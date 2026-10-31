@@ -1,5 +1,7 @@
 # model_catalog.php — live provider model catalogue
 
+The administration distinguishes cached model rows from a successful current refresh. A failed refresh does not change the last successful timestamp. Authentication failures show the affected provider and actionable key guidance without exposing the provider response or key. The refreshed report includes GenRouter alongside OpenRouter and Yandex.
+
 ## 1. Purpose
 
 `config.php → AVAILABLE_MODELS` is a hardcoded list that ages with the release.
@@ -20,6 +22,7 @@ PHP 7.4-compatible (no `str_contains` / `str_starts_with`).
 |---|---|
 | `MODEL_CATALOG_MODELS` | JSON array of normalized catalogue rows (the cache) |
 | `MODEL_CATALOG_SYNCED_AT` | UTC `Y-m-d\TH:i:s\Z` of the last refresh attempt that finished |
+| `MODEL_CATALOG_SUCCESS_AT` | UTC timestamp of the last refresh that received at least one provider response |
 | `MODEL_CATALOG_ERROR` | reason of the last failure (or of a partial one), rendered in `setup.php`; empty on full success |
 | `MODEL_CATALOG_TTL_MIN` | minutes a cache counts as fresh (default `ModelCatalog::TTL_MIN` = 15) |
 
@@ -43,7 +46,7 @@ ModelCatalog::newerSiblings(array $row, array $models): array
   errors are **never thrown**: the reason goes to `MODEL_CATALOG_ERROR`, the sync stamp
   is moved anyway (so a failing provider is not re-tried on every reload, only after the
   TTL), and the previous cache stays in place.
-- **`refresh`** — fetches both providers, stores the rows, the stamp and the (possibly
+- **`refresh`** — fetches configured providers, stores the rows, the stamp and the (possibly
   empty) error note. Returns `['rows' => int, 'openrouter' => int|string, 'yandex' => int|string]`
   where a string is that provider's failure reason. Throws `RuntimeException` only when
   **no** provider produced rows — then the previous cache is untouched.
@@ -56,13 +59,14 @@ ModelCatalog::newerSiblings(array $row, array $models): array
   carries no such flag — a curated flag always wins); an unknown model is appended. A live row
   whose short `id` collides with a hardcoded one is skipped. Hardcoded `id` / `group` /
   price are never rewritten, so a saved `LLM_DEFAULT_MODEL` cannot break.
-- **`forget`** — clears all three cache keys; the lists fall back to the hardcoded catalogue.
+- **`forget`** — clears all catalogue cache and timestamp keys; the lists fall back to the hardcoded catalogue.
 
 ## 4. Fetching
 
 | Provider | Request | Notes |
 |---|---|---|
 | OpenRouter | `GET` on `OPENROUTER_URL` with `/chat/completions` → `/models` | `Authorization: Bearer` added when `OPENROUTER_API_KEY` is set (the endpoint also answers without a key) |
+| GenRouter | `GET` on `GENROUTER_BASE_URL/models` | Requires `GENROUTER_API_KEY`; an HTTP 401/403 is reported as a key/access problem without copying the provider response |
 | Yandex | `GET` on `YANDEX_MODELS_URL` (`…/foundationModels/v1/models`) with `?folderId=<folder>`, `Authorization: Api-Key` + `x-folder-id` | the Models API — the list of what **this folder** really serves. Requires `YANDEX_API_KEY` **and** `YANDEX_FOLDER_ID`; skipped with a reason otherwise |
 | Yandex (fallback) | `GET` on `YANDEX_LLM_URL` with `/chat/completions` → `/models` | tried when the Models API is unavailable (older install, proxy, 404) or answers with no models; both failures are reported together |
 

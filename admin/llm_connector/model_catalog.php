@@ -33,6 +33,7 @@ final class ModelCatalog {
     /** `settings` keys: normalized cache, refresh stamp, last failure reason. */
     const KEY_MODELS = 'MODEL_CATALOG_MODELS';
     const KEY_SYNCED = 'MODEL_CATALOG_SYNCED_AT';
+    const KEY_SUCCESS = 'MODEL_CATALOG_SUCCESS_AT';
     const KEY_ERROR  = 'MODEL_CATALOG_ERROR';
 
     /** Minutes a cache counts as fresh (setting MODEL_CATALOG_TTL_MIN). */
@@ -124,6 +125,7 @@ final class ModelCatalog {
      */
     public static function refresh(array $cfg, SettingsStore $store): array {
         $rows = [];
+        $freshRows = 0;
         $report = ['genrouter' => null, 'openrouter' => null, 'yandex' => null];
         foreach (['genrouter' => 'fetchGenRouter', 'openrouter' => 'fetchOpenRouter', 'yandex' => 'fetchYandex'] as $prov => $fn) {
             if ($prov === 'genrouter' && empty($cfg['GENROUTER_API_KEY'])) continue;
@@ -132,13 +134,14 @@ final class ModelCatalog {
             try {
                 $got = self::$fn($cfg);
                 $report[$prov] = count($got);
+                $freshRows += count($got);
                 $rows = array_merge($rows, $got);
             } catch (Throwable $e) {
                 $report[$prov] = $e->getMessage();
                 foreach (self::decode((string)($cfg[self::KEY_MODELS] ?? '')) as $cached) if (($cached['provider'] ?? '') === $prov) $rows[]=$cached;
             }
         }
-        if (!$rows) {
+        if (!$freshRows) {
             throw new RuntimeException(
                 'GenRouter: ' . self::asText($report['genrouter']) . '; OpenRouter: ' . self::asText($report['openrouter']) . '; Yandex: ' . self::asText($report['yandex'])
             );
@@ -146,6 +149,7 @@ final class ModelCatalog {
         if (count($rows) > self::MAX_MODELS) $rows = array_slice($rows, 0, self::MAX_MODELS);
         $store->setSetting(self::KEY_MODELS, (string) json_encode($rows, JSON_UNESCAPED_UNICODE));
         $store->setSetting(self::KEY_SYNCED, gmdate('Y-m-d\TH:i:s\Z'));
+        $store->setSetting(self::KEY_SUCCESS, gmdate('Y-m-d\TH:i:s\Z'));
         // A partial failure (one provider silent) is worth a note too.
         $partial = array_filter($report, static function ($v) { return is_string($v); });
         $store->setSetting(self::KEY_ERROR, $partial
@@ -159,6 +163,7 @@ final class ModelCatalog {
     public static function forget(SettingsStore $store): void {
         $store->setSetting(self::KEY_MODELS, '');
         $store->setSetting(self::KEY_SYNCED, '');
+        $store->setSetting(self::KEY_SUCCESS, '');
         $store->setSetting(self::KEY_ERROR, '');
     }
 
@@ -460,7 +465,8 @@ final class ModelCatalog {
         $err  = curl_error($ch);
         curl_close($ch);
         if ($body === false) throw new RuntimeException('network: ' . ($err ?: 'request failed'));
-        if ($code >= 400)    throw new RuntimeException('HTTP ' . $code . ': ' . mb_substr((string) $body, 0, 160));
+        if ($code === 401 || $code === 403) throw new RuntimeException('HTTP ' . $code . ': проверьте API-ключ и доступ к каталогу моделей');
+        if ($code >= 400) throw new RuntimeException('HTTP ' . $code . ': ошибка каталога моделей');
         $j = json_decode((string) $body, true);
         if (!is_array($j))   throw new RuntimeException('response is not JSON');
         return $j;

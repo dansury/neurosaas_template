@@ -28,7 +28,7 @@ and never breaks config loading.
 
 `LLM_PROVIDER`, `LLM_DEFAULT_MODEL`, `LLM_PROVIDER_PRIORITY`, `OPENROUTER_API_KEY`,
 `LLM_VISION_MODEL`, `LLM_FALLBACK_MODEL`, `LLM_FALLBACK_MODE`, `LLM_FALLBACK_MODELS`,
-`MODEL_CATALOG_MODELS`, `MODEL_CATALOG_SYNCED_AT`, `MODEL_CATALOG_ERROR`,
+`MODEL_CATALOG_MODELS`, `MODEL_CATALOG_SYNCED_AT`, `MODEL_CATALOG_SUCCESS_AT`, `MODEL_CATALOG_ERROR`,
 `MODEL_CATALOG_TTL_MIN`, `LLM_OCR_MODELS`, `YANDEX_FALLBACK_MODEL`,
 `YANDEX_API_KEY`, `YANDEX_FOLDER_ID`, `YANDEX_LLM_URL`, `YANDEX_LLM_URL_FM`,
 `YANDEX_MODELS_URL`, `LLM_MAX_TOKENS`, `YANDEX_OCR_URL`,
@@ -44,7 +44,7 @@ Keys outside the whitelist are ENV/code-only (e.g. `OPENROUTER_URL`, `LLM_TIMEOU
 |---|---|
 | Provider switch | `LLM_PROVIDER` (`genrouter`), `LLM_DEFAULT_MODEL` (first confirmed GenRouter chat model), `LLM_PROVIDER_PRIORITY` (`genrouter,openrouter,yandex`) |
 | Fallback | `LLM_FALLBACK_MODE` (`auto` — a newer version of the same model first; `manual` — list only), `LLM_FALLBACK_MODELS` (`` — comma-separated short ids, written by three dropdowns in `setup.php`) |
-| Model catalogue | `MODEL_CATALOG_MODELS` (``), `MODEL_CATALOG_SYNCED_AT` (``), `MODEL_CATALOG_ERROR` (``), `MODEL_CATALOG_TTL_MIN` (15) — see `/specs/llm_connector/model_catalog.md` |
+| Model catalogue | `MODEL_CATALOG_MODELS` (``), `MODEL_CATALOG_SYNCED_AT` (``), `MODEL_CATALOG_SUCCESS_AT` (``), `MODEL_CATALOG_ERROR` (``), `MODEL_CATALOG_TTL_MIN` (15) — see `/specs/llm_connector/model_catalog.md` |
 | OpenRouter | `OPENROUTER_API_KEY` (``), `OPENROUTER_URL` (chat/completions), `LLM_FALLBACK_MODEL` (`openrouter/auto`), `LLM_OCR_MODELS` (array, comma-split from ENV) |
 | Vision | `LLM_VISION_MODEL` (first confirmed GenRouter vision model when unset) — the model for photos, labels and PDF pages. Accepts `"<provider>:<slug>"`, a short id, or a bare slug (bare = OpenRouter), so a Yandex multimodal model can be chosen here too (`/specs/llm_connector/llm.md` §2) |
 | Yandex Cloud | `YANDEX_API_KEY`, `YANDEX_FOLDER_ID`, `YANDEX_LLM_URL` (OpenAI-compatible), `YANDEX_LLM_URL_FM` (`…/foundationModels/v1/completion` — the second address, used for a model the first one does not serve, `/specs/llm_connector/llm.md` §5.1), `YANDEX_MODELS_URL` (`…/foundationModels/v1/models` — the Models API the catalogue refresh asks first), `YANDEX_OCR_URL` (`…/ocr/v1/recognizeText`), `YANDEX_OCR_MODEL` (`page`), `YANDEX_OCR_ENABLED` (`1`), `YANDEX_FALLBACK_MODEL` (`yandexgpt-5-lite`) |
