@@ -29,7 +29,7 @@ if (!function_exists('cfg_settings_whitelist')) {
             'OPENROUTER_API_KEY', 'LLM_VISION_MODEL', 'LLM_FALLBACK_MODEL',
             'LLM_FALLBACK_MODE', 'LLM_FALLBACK_MODELS',
             // Live model catalogue: cache, refresh stamp, last failure, TTL.
-            'MODEL_CATALOG_MODELS', 'MODEL_CATALOG_SYNCED_AT', 'MODEL_CATALOG_ERROR',
+            'MODEL_CATALOG_MODELS', 'MODEL_CATALOG_SYNCED_AT', 'MODEL_CATALOG_SUCCESS_AT', 'MODEL_CATALOG_ERROR',
             'MODEL_CATALOG_TTL_MIN',
             'LLM_OCR_MODELS', 'YANDEX_FALLBACK_MODEL',
             'YANDEX_API_KEY', 'YANDEX_FOLDER_ID', 'YANDEX_LLM_URL', 'YANDEX_LLM_URL_FM',
@@ -49,7 +49,7 @@ $config = [
     'LLM_PROVIDER'          => cfg_env('LLM_PROVIDER', 'genrouter'),       // 'yandex' | 'openrouter'
     'LLM_DEFAULT_MODEL'     => cfg_env('LLM_DEFAULT_MODEL', ''),
     // Comma-separated provider fallback order for LLM::dispatch(). Primary first.
-    'LLM_PROVIDER_PRIORITY' => cfg_env('LLM_PROVIDER_PRIORITY', 'GENROUTER_API_KEY', 'GENROUTER_BASE_URL', 'GENROUTER_MODEL', 'LLM_AUDIO_MODEL', 'openrouter,yandex'),
+    'LLM_PROVIDER_PRIORITY' => cfg_env('LLM_PROVIDER_PRIORITY', 'genrouter,openrouter,yandex'),
     // What to try right after the chosen model:
     //   auto   — a NEWER VERSION of the same model from the catalogue
     //            (gpt-4.1 → gpt-5.1), then LLM_FALLBACK_MODELS;
@@ -76,6 +76,7 @@ $config = [
        the stored JSON is only parsed — no network (see ModelCatalog). */
     'MODEL_CATALOG_MODELS'    => '',   // JSON catalogue rows; filled from settings
     'MODEL_CATALOG_SYNCED_AT' => '',   // last successful refresh
+    'MODEL_CATALOG_SUCCESS_AT' => '', // last successful refresh
     'MODEL_CATALOG_ERROR'     => '',   // last failure reason, rendered in setup.php
     'MODEL_CATALOG_TTL_MIN'   => cfg_env('MODEL_CATALOG_TTL_MIN', (string) ModelCatalog::TTL_MIN),
     // OpenRouter model ids tried in order during PDF OCR; first non-empty wins.

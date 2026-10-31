@@ -83,6 +83,7 @@ check('a stated image modality is honoured', $stated[0]['vision'], true);
 
 // ── the hardcoded rows are the ones AI Studio documents ───────────────────
 $cfgAll = require __DIR__ . '/../config.php';
+check('default provider priority keeps GenRouter first', $cfgAll['LLM_PROVIDER_PRIORITY'], 'genrouter,openrouter,yandex');
 $yandex = array_values(array_filter((array) $cfgAll['AVAILABLE_MODELS'],
     static function (array $m): bool { return ($m['provider'] ?? '') === 'yandex' && empty($m['ocr_only']); }));
 $slugs = array_column($yandex, 'full_id');

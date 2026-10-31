@@ -1,4 +1,5 @@
 # Toolkit parity
+The authenticated host may pass navigation markup to `Toolkit::settings($csrf, $navigation)`; the standalone module has no knowledge of host routes and keeps its own layout when no navigation is supplied.
 The template includes its LLM connector under admin/llm_connector. Each module owns its runtime files; specifications live in specs/llm_connector. No origin manifest or developer reporting credential is shipped.
 
 | Capability | Implementation | Verification |

@@ -139,7 +139,8 @@ if ($method === 'POST') {
             try {
                 $rep = ModelCatalog::refresh($cfg_live, $store);
                 $messages[] = ['ok' => true, 'at' => 'catalog', 'text' => '✅ Каталог обновлён: ' . (int) $rep['rows'] . ' моделей'
-                    . ' (OpenRouter: ' . (is_int($rep['openrouter']) ? $rep['openrouter'] : '⛔ ' . $rep['openrouter'])
+                    . ' (GenRouter: ' . (is_int($rep['genrouter']) ? $rep['genrouter'] : '⛔ ' . ($rep['genrouter'] ?? 'не настроен'))
+                    . ', OpenRouter: ' . (is_int($rep['openrouter']) ? $rep['openrouter'] : '⛔ ' . ($rep['openrouter'] ?? 'не настроен'))
                     . ', Yandex: ' . (is_int($rep['yandex']) ? $rep['yandex'] : '⛔ ' . $rep['yandex']) . ').'];
             } catch (Throwable $e) {
                 $messages[] = ['ok' => false, 'at' => 'catalog', 'text' => '⚠️ Каталог моделей не получен: ' . $e->getMessage()];
@@ -329,7 +330,7 @@ input, select, textarea, button, .box { border-radius: 8px; }
   .row { display: flex; flex-wrap: wrap; gap: 12px; } .row > * { flex: 1 1 220px; min-width: 0; }
   a { color: #171717; }
 </style></head><body>
-<h1>llm_connector — настройки <a href="?logout=1" style="font-size:13px;float:right">выйти</a></h1>
+<h1>llm_connector — настройки <span style="float:right;font-size:13px"><?php if ($hostAuthenticated): ?><a href="?feedback=1">Заказать доработку</a> · <?php endif; ?><a href="?logout=1">выйти</a></span></h1>
 <p class="lede">Заполните только нужные поля — пустые значения не перезаписывают существующие. Значения сразу применяются ко всему сервису (overlay через таблицу <code>settings</code>).</p>
 
 <?php
@@ -387,20 +388,21 @@ echo Selfheal\SelfHeal::adminNotice();
   <?php
   $live_rows   = ModelCatalog::decode((string) ($cfg['MODEL_CATALOG_MODELS'] ?? ''));
   $live_synced = (string) ($cfg['MODEL_CATALOG_SYNCED_AT'] ?? '');
+  $live_success = (string) ($cfg['MODEL_CATALOG_SUCCESS_AT'] ?? '');
   $live_error  = (string) ($cfg['MODEL_CATALOG_ERROR'] ?? '');
   $live_ttl    = (int) ($cfg['MODEL_CATALOG_TTL_MIN'] ?? ModelCatalog::TTL_MIN);
   ?>
   <p class="lede" style="margin:-4px 0 10px">
-    Список тянется прямо у провайдеров (OpenRouter <code>GET /models</code>, Yandex <code>GET /foundationModels/v1/models</code>)
+    Список тянется прямо у провайдеров (GenRouter и OpenRouter <code>GET /models</code>, Yandex <code>GET /foundationModels/v1/models</code>)
     и кэшируется в настройках. Каталог обновляется сам при заходе на эту страницу, если кэш старше
     <?= $live_ttl ?> мин; кнопка ниже обновляет сразу. Пока обновления не было — работает вшитый список.
     <?php if ($live_rows): ?>
-      <br>Сейчас живых моделей: <b><?= count($live_rows) ?></b><?= $live_synced !== '' ? ', обновлено ' . $h($live_synced) : '' ?>.
+      <br>В сохранённом каталоге: <b><?= count($live_rows) ?></b> моделей<?= $live_success !== '' ? ', успешное обновление ' . $h($live_success) : '' ?>.<?= $live_synced !== '' ? ' Последняя попытка: ' . $h($live_synced) . '.' : '' ?>
     <?php else: ?>
       <br>Живого каталога пока нет — в списках только вшитые модели.
     <?php endif; ?>
     <?php if ($live_error !== ''): ?>
-      <br><span style="color:#a82742">Последняя попытка: <?= $h(mb_substr($live_error, 0, 200)) ?></span>
+      <br><span style="color:#a82742">Ошибка обновления: <?= $h(mb_substr($live_error, 0, 200)) ?>. Проверьте ключ у провайдера и сохраните новый ключ в разделе API-ключи.</span>
     <?php endif; ?>
   </p>
   <label><span>Срок годности кэша каталога, мин</span><input type="text" name="MODEL_CATALOG_TTL_MIN" placeholder="<?= $h((string) $live_ttl) ?>"></label>
